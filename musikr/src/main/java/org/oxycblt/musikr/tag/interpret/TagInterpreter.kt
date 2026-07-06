@@ -72,9 +72,28 @@ private class TagInterpreterImpl(private val interpretation: Interpretation) : T
         val albumNameOrDir = song.tags.albumName ?: song.file.path.directory.name
 
         val musicBrainzId = song.tags.musicBrainzId?.toUuidOrNull()
+
+        // v363 is the CURRENT primary identity (becomes Song.uid). It must be
+        // unique per physical file, otherwise two files that share identical
+        // tags OR a copied MusicBrainz ID collapse into one library entry —
+        // which previously hid files entirely, and (once we stopped hiding
+        // them) caused one file's row to resolve to another file via
+        // findSong(uid). Folding the unique file path into the UID guarantees
+        // one distinct identity per file regardless of tag/MBID duplication.
+        //
+        // NOTE: this means Song.uid changed for everyone as of this build, so
+        // saved playlist/playback references resolve via the v400/v401
+        // back-compat fallbacks below (which are deliberately left path-free).
+        // For genuinely unique songs those fallbacks still match exactly as
+        // before, so only true duplicates are affected by the identity change.
+        val filePathKey = song.file.path.toString()
         val v363uid =
-            musicBrainzId?.let { Music.UID.musicBrainz(Music.UID.Item.SONG, it) }
-                ?: Music.UID.auxio(Music.UID.Item.SONG) {
+            Music.UID.auxio(Music.UID.Item.SONG) {
+                // Preserve the original tag/MBID-derived component so the UID
+                // still reflects musical identity, then disambiguate by path.
+                if (musicBrainzId != null) {
+                    update(musicBrainzId.toString())
+                } else {
                     update(songNameOrFileWithoutExtCorrect)
                     update(albumNameOrDir)
                     update(song.tags.date)
@@ -85,6 +104,8 @@ private class TagInterpreterImpl(private val interpretation: Interpretation) : T
                     update(song.tags.artistNames)
                     update(song.tags.albumArtistNames)
                 }
+                update(filePathKey)
+            }
 
         // I was an idiot and accidentally changed the UID spec in v4.0.0, so we need to calculate
         // the broken UID too and maintain compat for that version.

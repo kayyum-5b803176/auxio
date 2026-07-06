@@ -185,10 +185,15 @@ private class MusicGraphBuilderImpl : MusicGraph.Builder {
     private val playlistVertices = mutableSetOf<PlaylistVertex>()
 
     override fun add(preSong: PreSong) {
+        // Song UIDs are now guaranteed unique per physical file (see
+        // TagInterpreter — the file path is folded into the primary UID), so a
+        // collision here would only happen for the literal same file added
+        // twice. We therefore no longer drop "duplicates": every distinct file
+        // gets its own vertex and appears in the library, which is what lets
+        // duplicate/similarity detection see every file. The old code did
+        // `if (songVertices.containsKey(uid)) return`, which silently hid any
+        // file whose tags/MBID matched another.
         val uid = preSong.v363Uid
-        if (songVertices.containsKey(uid)) {
-            return
-        }
 
         val songGenreVertices =
             preSong.preGenres.map { preGenre ->
