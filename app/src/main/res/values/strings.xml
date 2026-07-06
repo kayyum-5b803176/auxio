@@ -316,6 +316,25 @@
     <string name="set_pre_amp_warning">Warning: Changing the pre-amp to a high positive value may result in peaking on some audio tracks.</string>
 
     <string name="set_library">Library</string>
+
+    <string name="set_plugins">Plugins</string>
+    <string name="set_plugins_desc">Enable optional experimental features</string>
+    <string name="set_similarity_detection">Similarity detection</string>
+    <string name="set_similarity_detection_desc">Acoustically fingerprint your library to find duplicate songs. Adds a "Find duplicates" entry to Library settings. Has no effect on the app while disabled.</string>
+    <string name="set_find_duplicates">Find duplicates</string>
+    <string name="set_find_duplicates_desc">Scan for files containing the same recording</string>
+    <string name="dup_scanning">Analyzing library for duplicates…</string>
+    <string name="dup_scan_progress">Fingerprinted %1$d/%2$d songs</string>
+    <string name="dup_none_found">No duplicates found. Every song in your library appears to be acoustically unique.</string>
+    <string name="dup_groups_found">%1$d duplicate groups found</string>
+    <string name="dup_group_title">Possible duplicate (%1$d%% audio match)</string>
+    <string name="dup_delete">Delete</string>
+    <string name="dup_keep_hint">Highest quality</string>
+    <string name="dup_delete_confirm_title">Delete this file?</string>
+    <string name="dup_delete_confirm_desc">%1$s will be permanently deleted from your device. This cannot be undone.</string>
+    <string name="dup_delete_failed">Could not delete file. Auxio may not have write permission for this location.</string>
+    <string name="dup_deleted">File deleted</string>
+
     <string name="set_locations">Music sources</string>
     <string name="set_locations_desc">Manage where music should be loaded from</string>
     <string name="set_load_from">Load From</string>

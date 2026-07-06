@@ -26,8 +26,10 @@ import androidx.preference.PreferenceFragmentCompat
 import com.google.android.material.transition.MaterialFadeThrough
 import com.google.android.material.transition.MaterialSharedAxis
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 import org.oxycblt.auxio.R
 import org.oxycblt.auxio.music.MusicViewModel
+import org.oxycblt.auxio.plugin.similarity.PluginSettings
 import org.oxycblt.auxio.settings.ui.WrappedDialogPreference
 import org.oxycblt.auxio.util.navigateSafe
 import timber.log.Timber as L
@@ -40,6 +42,7 @@ import timber.log.Timber as L
 @AndroidEntryPoint
 class RootPreferenceFragment : BasePreferenceFragment(R.xml.preferences_root) {
     private val musicModel: MusicViewModel by activityViewModels()
+    @Inject lateinit var pluginSettings: PluginSettings
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,6 +51,16 @@ class RootPreferenceFragment : BasePreferenceFragment(R.xml.preferences_root) {
         returnTransition = MaterialFadeThrough()
         exitTransition = MaterialFadeThrough()
         reenterTransition = MaterialSharedAxis(MaterialSharedAxis.X, false)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // The duplicates entry mirrors the Similarity Detection plugin flag.
+        // Re-checked on every resume so toggling the plugin and navigating
+        // back reflects immediately. While the plugin is disabled the entry
+        // is invisible and no plugin code runs at all.
+        findPreference<Preference>(getString(R.string.set_key_find_duplicates))?.isVisible =
+            pluginSettings.similarityDetectionEnabled
     }
 
     override fun onOpenDialogPreference(preference: WrappedDialogPreference) {
@@ -81,6 +94,16 @@ class RootPreferenceFragment : BasePreferenceFragment(R.xml.preferences_root) {
             getString(R.string.set_key_audio) -> {
                 L.d("Navigating to audio preferences")
                 findNavController().navigateSafe(RootPreferenceFragmentDirections.audioPeferences())
+            }
+            getString(R.string.set_key_plugins) -> {
+                L.d("Navigating to plugin preferences")
+                findNavController()
+                    .navigateSafe(RootPreferenceFragmentDirections.pluginPreferences())
+            }
+            getString(R.string.set_key_find_duplicates) -> {
+                L.d("Navigating to duplicates screen")
+                findNavController()
+                    .navigateSafe(RootPreferenceFragmentDirections.findDuplicates())
             }
             getString(R.string.set_key_reindex) -> musicModel.refresh()
             getString(R.string.set_key_rescan) -> musicModel.rescan()

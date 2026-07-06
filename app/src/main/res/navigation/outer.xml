@@ -36,7 +36,24 @@
         <action
             android:id="@+id/music_locations_settings"
             app:destination="@id/music_locations_dialog" />
+        <action
+            android:id="@+id/plugin_preferences"
+            app:destination="@id/plugin_preferences_fragment" />
+        <action
+            android:id="@+id/find_duplicates"
+            app:destination="@id/duplicates_fragment" />
     </fragment>
+
+    <fragment
+        android:id="@+id/plugin_preferences_fragment"
+        android:name="org.oxycblt.auxio.settings.categories.PluginPreferenceFragment"
+        android:label="plugin_preferences_fragment" />
+
+    <fragment
+        android:id="@+id/duplicates_fragment"
+        android:name="org.oxycblt.auxio.plugin.similarity.DuplicatesFragment"
+        android:label="duplicates_fragment"
+        tools:layout="@layout/fragment_duplicates" />
 
     <fragment
         android:id="@+id/ui_preferences_fragment"

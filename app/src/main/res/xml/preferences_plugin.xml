@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:title="@string/set_plugins">
+
+    <SwitchPreferenceCompat
+        app:defaultValue="false"
+        app:key="@string/set_key_similarity_detection"
+        app:summary="@string/set_similarity_detection_desc"
+        app:title="@string/set_similarity_detection" />
+
+</PreferenceScreen>

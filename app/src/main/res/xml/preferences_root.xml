@@ -26,6 +26,12 @@
         app:summary="@string/set_audio_desc"
         app:title="@string/set_audio" />
 
+    <Preference
+        app:icon="@drawable/ic_config_24"
+        app:key="@string/set_key_plugins"
+        app:summary="@string/set_plugins_desc"
+        app:title="@string/set_plugins" />
+
     <PreferenceCategory app:title="@string/set_library">
 
         <org.oxycblt.auxio.settings.ui.WrappedDialogPreference
@@ -42,6 +48,12 @@
             app:key="@string/set_key_rescan"
             app:summary="@string/set_rescan_desc"
             app:title="@string/set_rescan" />
+
+        <Preference
+            app:isPreferenceVisible="false"
+            app:key="@string/set_key_find_duplicates"
+            app:summary="@string/set_find_duplicates_desc"
+            app:title="@string/set_find_duplicates" />
 
     </PreferenceCategory>
 
