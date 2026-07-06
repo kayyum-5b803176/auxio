@@ -18,10 +18,15 @@
 
 package org.oxycblt.auxio.plugin.similarity
 
+import android.content.Context
+import androidx.room.Room
 import dagger.Binds
 import dagger.Module
+import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -31,4 +36,23 @@ interface PluginModule {
     @Binds fun audioFingerprinter(impl: AudioFingerprinterImpl): AudioFingerprinter
 
     @Binds fun songDeleter(impl: SongDeleterImpl): SongDeleter
+
+    @Binds fun fingerprintRepository(impl: FingerprintRepositoryImpl): FingerprintRepository
+}
+
+@Module
+@InstallIn(SingletonComponent::class)
+class PluginRoomModule {
+    @Singleton
+    @Provides
+    fun fingerprintDatabase(@ApplicationContext context: Context) =
+        Room.databaseBuilder(
+                context.applicationContext,
+                FingerprintDatabase::class.java,
+                "fingerprint_cache.db")
+            .fallbackToDestructiveMigration()
+            .build()
+
+    @Provides
+    fun fingerprintDao(database: FingerprintDatabase) = database.fingerprintDao()
 }

@@ -331,19 +331,27 @@ constructor(@ApplicationContext private val context: Context) : AudioFingerprint
 
     private fun bandEnd(band: Int): Int = BAND_EDGES[band + 1]
 
-    private companion object {
-        const val TARGET_SAMPLE_RATE = 11025
-        const val WINDOW_SECONDS = 30.0
-        const val WINDOW_START_FRACTION = 0.25
-        const val FRAME_SIZE = 4096 // ~0.37s at 11025Hz
-        const val HOP_SIZE = FRAME_SIZE / 8 // ~46ms; high overlap smooths the time derivative
-        const val TIME_LAG = 4 // frames of separation for the temporal gradient
-        const val BANDS = 16
-        const val DEQUEUE_TIMEOUT_US = 10_000L
+    companion object {
+        /**
+         * Bump this whenever the fingerprint algorithm changes in any way that
+         * affects output (band edges, frame/hop size, quantization, decode
+         * window, etc.). Cached fingerprints tagged with an older version are
+         * treated as stale and recomputed, so no manual DB migration is needed.
+         */
+        const val FINGERPRINT_ALGORITHM_VERSION = 1
+
+        private const val TARGET_SAMPLE_RATE = 11025
+        private const val WINDOW_SECONDS = 30.0
+        private const val WINDOW_START_FRACTION = 0.25
+        private const val FRAME_SIZE = 4096 // ~0.37s at 11025Hz
+        private const val HOP_SIZE = FRAME_SIZE / 8 // ~46ms; high overlap smooths the time derivative
+        private const val TIME_LAG = 4 // frames of separation for the temporal gradient
+        private const val BANDS = 16
+        private const val DEQUEUE_TIMEOUT_US = 10_000L
 
         // Approximately log-spaced band edges (FFT bin indices) from ~30Hz to
         // ~5kHz at 11025Hz/4096 — covers the perceptually dominant range.
-        val BAND_EDGES =
+        private val BAND_EDGES =
             intArrayOf(11, 16, 23, 33, 47, 67, 96, 137, 195, 278, 397, 566, 807, 1151, 1641, 1900, 2048)
     }
 }

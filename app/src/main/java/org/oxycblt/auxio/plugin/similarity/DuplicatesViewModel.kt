@@ -49,6 +49,7 @@ class DuplicatesViewModel
 constructor(
     private val musicRepository: MusicRepository,
     private val fingerprinter: AudioFingerprinter,
+    private val fingerprintRepository: FingerprintRepository,
     private val duplicateFinder: DuplicateFinder,
     private val songDeleter: SongDeleter
 ) : ViewModel() {
@@ -98,6 +99,10 @@ constructor(
         scanJob =
             viewModelScope.launch {
                 _scanState.value = ScanState.Scanning(0, songs.size)
+                // Drop cache rows for songs no longer in the library so the DB
+                // doesn't grow without bound as the user's collection changes.
+                fingerprintRepository.prune(songs)
+
                 var done = 0
                 // Bounded parallelism: decoding is I/O+codec heavy; a couple
                 // of concurrent decodes saturate most devices without
@@ -107,12 +112,30 @@ constructor(
                     songs
                         .map { song ->
                             async {
-                                semaphore.withPermit {
-                                    val fp = fingerprinter.fingerprint(song.uri, song.durationMs)
-                                    done++
-                                    _scanState.value = ScanState.Scanning(done, songs.size)
-                                    if (fp != null && fp.isNotEmpty()) song to fp else null
-                                }
+                                // Cache first: a valid cached entry skips the
+                                // expensive decode+FFT entirely. Only true
+                                // misses (new song, changed file, or bumped
+                                // algorithm version) fall through to analysis.
+                                val cached = fingerprintRepository.getCached(song)
+                                val fp =
+                                    if (cached != null) {
+                                        cached
+                                    } else {
+                                        semaphore.withPermit {
+                                            val computed =
+                                                fingerprinter.fingerprint(
+                                                    song.uri, song.durationMs)
+                                            // Persist even an empty/failed result
+                                            // (empty array) so an unfingerprintable
+                                            // file isn't retried every scan.
+                                            fingerprintRepository.put(
+                                                song, computed ?: IntArray(0))
+                                            computed
+                                        }
+                                    }
+                                done++
+                                _scanState.value = ScanState.Scanning(done, songs.size)
+                                if (fp != null && fp.isNotEmpty()) song to fp else null
                             }
                         }
                         .awaitAll()
