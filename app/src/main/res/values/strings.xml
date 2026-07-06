@@ -334,6 +334,14 @@
     <string name="dup_delete_confirm_desc">%1$s will be permanently deleted from your device. This cannot be undone.</string>
     <string name="dup_delete_failed">Could not delete file. Auxio may not have write permission for this location.</string>
     <string name="dup_deleted">File deleted</string>
+    <string name="dup_reason_real_lossless">Real %1$s (full spectrum)</string>
+    <string name="dup_reason_most_detail">%1$s — most real detail in this group</string>
+    <string name="dup_reason_fake_lossless">Fake lossless — %1$s cut off ~%2$d kHz (transcoded from lossy)</string>
+    <string name="dup_reason_less_detail">%1$s — less detail (content to ~%2$d kHz)</string>
+    <string name="dup_reason_equivalent_kept">%1$s — equivalent audio, kept for format/size</string>
+    <string name="dup_reason_equivalent_duplicate">%1$s — same audio as the kept file</string>
+    <string name="dup_reason_unanalyzable">%1$s — could not analyze audio</string>
+    <string name="dup_reason_single">%1$s</string>
 
     <string name="set_locations">Music sources</string>
     <string name="set_locations_desc">Manage where music should be loaded from</string>

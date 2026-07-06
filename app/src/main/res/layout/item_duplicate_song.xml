@@ -48,6 +48,14 @@
             </LinearLayout>
 
             <TextView
+                android:id="@+id/duplicate_song_reason"
+                style="@style/TextAppearance.Auxio.LabelMedium"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/spacing_tiny"
+                tools:text="Fake lossless — FLAC cut off ~16 kHz" />
+
+            <TextView
                 android:id="@+id/duplicate_song_details"
                 style="@style/TextAppearance.Auxio.BodyMedium"
                 android:layout_width="wrap_content"

@@ -30,19 +30,19 @@ import org.oxycblt.musikr.Song
  */
 interface FingerprintRepository {
     /**
-     * Load a valid cached fingerprint for [song], or null on a miss (never
+     * Load a valid cached result for [song], or null on a miss (never
      * analyzed, file changed since, or algorithm changed).
      *
-     * Returns an empty [IntArray] if the song was previously analyzed and
-     * legitimately produced no fingerprint — callers should treat empty as a
-     * cache HIT (don't retry) and simply exclude it from comparison.
+     * A cached result with an empty fingerprint is a legitimate cache HIT
+     * (the file was analyzed but produced no usable fingerprint) — callers
+     * should not retry it.
      */
-    suspend fun getCached(song: Song): IntArray?
+    suspend fun getCached(song: Song): FingerprintResult?
 
-    /** Persist a freshly computed fingerprint (empty allowed, see [getCached]). */
-    suspend fun put(song: Song, fingerprint: IntArray)
+    /** Persist a freshly computed result (empty fingerprint allowed). */
+    suspend fun put(song: Song, result: FingerprintResult)
 
-    /** Drop cache rows for songs no longer present, keeping the DB from growing unbounded. */
+    /** Drop cache rows for songs no longer present. */
     suspend fun prune(liveSongs: Collection<Song>)
 
     /** Clear the entire fingerprint cache. */
@@ -53,21 +53,22 @@ class FingerprintRepositoryImpl
 @Inject
 constructor(private val dao: FingerprintDao) : FingerprintRepository {
 
-    override suspend fun getCached(song: Song): IntArray? {
+    override suspend fun getCached(song: Song): FingerprintResult? {
         val entity = dao.get(song.uid) ?: return null
         val fresh =
             entity.modifiedMs == song.modifiedMs &&
                 entity.algorithmVersion == AudioFingerprinterImpl.FINGERPRINT_ALGORITHM_VERSION
-        return if (fresh) entity.fingerprint else null
+        return if (fresh) FingerprintResult(entity.fingerprint, entity.spectralProfile) else null
     }
 
-    override suspend fun put(song: Song, fingerprint: IntArray) {
+    override suspend fun put(song: Song, result: FingerprintResult) {
         dao.insert(
             FingerprintEntity(
                 uid = song.uid,
                 modifiedMs = song.modifiedMs,
                 algorithmVersion = AudioFingerprinterImpl.FINGERPRINT_ALGORITHM_VERSION,
-                fingerprint = fingerprint))
+                fingerprint = result.fingerprint,
+                spectralProfile = result.spectralProfile))
     }
 
     override suspend fun prune(liveSongs: Collection<Song>) {

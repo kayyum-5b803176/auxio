@@ -46,6 +46,17 @@
             android:layout_marginTop="@dimen/spacing_medium"
             tools:text="@string/dup_scanning" />
 
+        <TextView
+            android:id="@+id/duplicates_log"
+            style="@style/TextAppearance.Auxio.BodySmall"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/spacing_medium"
+            android:gravity="center"
+            android:maxLines="6"
+            android:textColor="?android:attr/textColorSecondary"
+            tools:text="song1.flac\nsong2.mp3\nsong3.m4a" />
+
     </LinearLayout>
 
     <TextView

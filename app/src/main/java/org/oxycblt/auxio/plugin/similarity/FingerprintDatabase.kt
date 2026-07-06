@@ -45,7 +45,7 @@ import org.oxycblt.musikr.Music
  * so bumping the fingerprint algorithm transparently invalidates all old
  * entries without a manual DB migration.
  */
-@Database(entities = [FingerprintEntity::class], version = 1, exportSchema = false)
+@Database(entities = [FingerprintEntity::class], version = 3, exportSchema = false)
 @TypeConverters(Music.UID.TypeConverters::class, FingerprintConverters::class)
 abstract class FingerprintDatabase : RoomDatabase() {
     abstract fun fingerprintDao(): FingerprintDao
@@ -90,7 +90,9 @@ data class FingerprintEntity(
     @PrimaryKey val uid: Music.UID,
     val modifiedMs: Long,
     val algorithmVersion: Int,
-    val fingerprint: IntArray
+    val fingerprint: IntArray,
+    /** Per-band spectral profile for quality analysis (see AudioFingerprinter). */
+    val spectralProfile: FloatArray
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -98,7 +100,8 @@ data class FingerprintEntity(
         return uid == other.uid &&
             modifiedMs == other.modifiedMs &&
             algorithmVersion == other.algorithmVersion &&
-            fingerprint.contentEquals(other.fingerprint)
+            fingerprint.contentEquals(other.fingerprint) &&
+            spectralProfile.contentEquals(other.spectralProfile)
     }
 
     override fun hashCode(): Int {
@@ -106,11 +109,12 @@ data class FingerprintEntity(
         result = 31 * result + modifiedMs.hashCode()
         result = 31 * result + algorithmVersion
         result = 31 * result + fingerprint.contentHashCode()
+        result = 31 * result + spectralProfile.contentHashCode()
         return result
     }
 }
 
-/** Stores the int-array fingerprint as a compact little-endian BLOB. */
+/** Stores int-array and float-array payloads as compact little-endian BLOBs. */
 class FingerprintConverters {
     @TypeConverter
     fun fromIntArray(value: IntArray): ByteArray {
@@ -124,6 +128,21 @@ class FingerprintConverters {
         val intBuffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer()
         val out = IntArray(intBuffer.remaining())
         intBuffer.get(out)
+        return out
+    }
+
+    @TypeConverter
+    fun fromFloatArray(value: FloatArray): ByteArray {
+        val buffer = ByteBuffer.allocate(value.size * 4).order(ByteOrder.LITTLE_ENDIAN)
+        buffer.asFloatBuffer().put(value)
+        return buffer.array()
+    }
+
+    @TypeConverter
+    fun toFloatArray(bytes: ByteArray): FloatArray {
+        val floatBuffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
+        val out = FloatArray(floatBuffer.remaining())
+        floatBuffer.get(out)
         return out
     }
 }

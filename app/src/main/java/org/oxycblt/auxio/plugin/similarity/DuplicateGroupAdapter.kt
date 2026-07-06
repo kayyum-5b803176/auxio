@@ -18,6 +18,7 @@
 
 package org.oxycblt.auxio.plugin.similarity
 
+import android.content.Context
 import android.text.format.Formatter
 import android.view.LayoutInflater
 import android.view.ViewGroup
@@ -31,6 +32,29 @@ import org.oxycblt.auxio.databinding.ItemDuplicateSongBinding
 import org.oxycblt.auxio.music.resolve
 import org.oxycblt.musikr.Song
 
+/** Resolve a structured [QualityAnalyzer.Reason] to a localized string. */
+private fun resolveReason(context: Context, reason: QualityAnalyzer.Reason): String =
+    when (reason) {
+        is QualityAnalyzer.Reason.RealLossless ->
+            context.getString(R.string.dup_reason_real_lossless, reason.formatName)
+        is QualityAnalyzer.Reason.MostDetail ->
+            context.getString(R.string.dup_reason_most_detail, reason.formatName)
+        is QualityAnalyzer.Reason.FakeLossless ->
+            context.getString(
+                R.string.dup_reason_fake_lossless, reason.formatName, reason.approxKHz)
+        is QualityAnalyzer.Reason.LessDetail ->
+            context.getString(
+                R.string.dup_reason_less_detail, reason.formatName, reason.approxKHz)
+        is QualityAnalyzer.Reason.EquivalentKept ->
+            context.getString(R.string.dup_reason_equivalent_kept, reason.formatName)
+        is QualityAnalyzer.Reason.EquivalentDuplicate ->
+            context.getString(R.string.dup_reason_equivalent_duplicate, reason.formatName)
+        is QualityAnalyzer.Reason.Unanalyzable ->
+            context.getString(R.string.dup_reason_unanalyzable, reason.formatName)
+        is QualityAnalyzer.Reason.Single ->
+            context.getString(R.string.dup_reason_single, reason.formatName)
+    }
+
 /**
  * Displays [DuplicateFinder.DuplicateGroup]s as cards, each listing its songs
  * with the metadata a user needs to choose which copy to keep: format,
@@ -39,7 +63,7 @@ import org.oxycblt.musikr.Song
  * "highest quality" hint.
  */
 class DuplicateGroupAdapter(private val listener: Listener) :
-    ListAdapter<DuplicateFinder.DuplicateGroup, DuplicateGroupAdapter.GroupViewHolder>(DIFFER) {
+    ListAdapter<DuplicatesViewModel.RankedGroup, DuplicateGroupAdapter.GroupViewHolder>(DIFFER) {
 
     interface Listener {
         fun onDeleteRequested(song: Song)
@@ -57,7 +81,7 @@ class DuplicateGroupAdapter(private val listener: Listener) :
     class GroupViewHolder(private val binding: ItemDuplicateGroupBinding) :
         RecyclerView.ViewHolder(binding.root) {
 
-        fun bind(group: DuplicateFinder.DuplicateGroup, listener: Listener) {
+        fun bind(group: DuplicatesViewModel.RankedGroup, listener: Listener) {
             val context = binding.root.context
             binding.duplicateGroupTitle.text =
                 context.getString(
@@ -65,12 +89,18 @@ class DuplicateGroupAdapter(private val listener: Listener) :
 
             binding.duplicateGroupSongs.removeAllViews()
             val inflater = LayoutInflater.from(context)
-            group.songs.forEachIndexed { index, song ->
+            group.ranked.forEach { ranked ->
+                val song = ranked.song
                 val songBinding =
                     ItemDuplicateSongBinding.inflate(
                         inflater, binding.duplicateGroupSongs, true)
                 songBinding.duplicateSongTitle.text = song.name.resolve(context)
-                songBinding.duplicateSongKeepHint.isVisible = index == 0 && group.songs.size > 1
+                songBinding.duplicateSongKeepHint.isVisible = ranked.isRecommendedKeep
+                // The quality reason — WHY this file was ranked where it was,
+                // e.g. "Fake lossless — FLAC cut off ~16 kHz". This is the
+                // explanation the user asked to see. Resolved from the
+                // structured Reason here (QualityAnalyzer has no Context).
+                songBinding.duplicateSongReason.text = resolveReason(context, ranked.reason)
                 songBinding.duplicateSongDetails.text =
                     listOf(
                             song.format.resolve(context),
@@ -88,15 +118,17 @@ class DuplicateGroupAdapter(private val listener: Listener) :
 
     private companion object {
         val DIFFER =
-            object : DiffUtil.ItemCallback<DuplicateFinder.DuplicateGroup>() {
+            object : DiffUtil.ItemCallback<DuplicatesViewModel.RankedGroup>() {
                 override fun areItemsTheSame(
-                    oldItem: DuplicateFinder.DuplicateGroup,
-                    newItem: DuplicateFinder.DuplicateGroup
-                ) = oldItem.songs.firstOrNull()?.uid == newItem.songs.firstOrNull()?.uid
+                    oldItem: DuplicatesViewModel.RankedGroup,
+                    newItem: DuplicatesViewModel.RankedGroup
+                ) =
+                    oldItem.ranked.firstOrNull()?.song?.uid ==
+                        newItem.ranked.firstOrNull()?.song?.uid
 
                 override fun areContentsTheSame(
-                    oldItem: DuplicateFinder.DuplicateGroup,
-                    newItem: DuplicateFinder.DuplicateGroup
+                    oldItem: DuplicatesViewModel.RankedGroup,
+                    newItem: DuplicatesViewModel.RankedGroup
                 ) = oldItem == newItem
             }
     }

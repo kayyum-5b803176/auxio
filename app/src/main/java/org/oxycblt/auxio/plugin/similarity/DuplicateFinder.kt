@@ -49,8 +49,8 @@ class DuplicateFinder @Inject constructor() {
         val minSimilarity: Float
     )
 
-    fun find(fingerprints: Map<Song, IntArray>): List<DuplicateGroup> {
-        val songs = fingerprints.keys.toList()
+    fun find(results: Map<Song, FingerprintResult>): List<DuplicateGroup> {
+        val songs = results.keys.toList()
         val matches = mutableListOf<Match>()
 
         for (i in songs.indices) {
@@ -59,8 +59,8 @@ class DuplicateFinder @Inject constructor() {
                 val b = songs[j]
                 if (abs(a.durationMs - b.durationMs) > DURATION_TOLERANCE_MS) continue
 
-                val fpA = fingerprints.getValue(a)
-                val fpB = fingerprints.getValue(b)
+                val fpA = results.getValue(a).fingerprint
+                val fpB = results.getValue(b).fingerprint
                 val similarity = alignedSimilarity(fpA, fpB)
                 if (similarity >= MATCH_THRESHOLD) {
                     matches.add(Match(a, b, similarity))
@@ -130,10 +130,10 @@ class DuplicateFinder @Inject constructor() {
             val groupSims =
                 matches.filter { it.a in memberSet && it.b in memberSet }.map { it.similarity }
             DuplicateGroup(
-                // Highest quality first so the UI's "keep" recommendation is
-                // simply the top row.
-                songs = members.sortedWith(
-                    compareByDescending<Song> { it.bitrateKbps }.thenByDescending { it.size }),
+                // Order is decided later by QualityAnalyzer (true-quality based),
+                // not here — we no longer pre-sort by bitrate, which was the
+                // source of the "always keep the bloated FLAC" bug.
+                songs = members.toList(),
                 minSimilarity = groupSims.minOrNull() ?: MATCH_THRESHOLD)
         }
     }

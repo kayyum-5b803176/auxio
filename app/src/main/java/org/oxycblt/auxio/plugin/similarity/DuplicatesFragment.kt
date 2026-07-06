@@ -112,6 +112,10 @@ class DuplicatesFragment : ViewBindingFragment<FragmentDuplicatesBinding>() {
             }
         }
 
+        collectImmediately(duplicatesModel.processingLog) { log ->
+            binding.duplicatesLog.text = log.joinToString("\n")
+        }
+
         collectImmediately(duplicatesModel.deleteEvent) { event ->
             when (event) {
                 null -> {}

@@ -51,15 +51,22 @@ constructor(
     private val fingerprinter: AudioFingerprinter,
     private val fingerprintRepository: FingerprintRepository,
     private val duplicateFinder: DuplicateFinder,
+    private val qualityAnalyzer: QualityAnalyzer,
     private val songDeleter: SongDeleter
 ) : ViewModel() {
+
+    /** A duplicate group with its files ranked by true quality (best first). */
+    data class RankedGroup(
+        val ranked: List<QualityAnalyzer.Ranked>,
+        val minSimilarity: Float
+    )
 
     sealed interface ScanState {
         data object Idle : ScanState
 
-        data class Scanning(val done: Int, val total: Int) : ScanState
+        data class Scanning(val done: Int, val total: Int, val currentFile: String?) : ScanState
 
-        data class Results(val groups: List<DuplicateFinder.DuplicateGroup>) : ScanState
+        data class Results(val groups: List<RankedGroup>) : ScanState
     }
 
     sealed interface DeleteEvent {
@@ -76,6 +83,14 @@ constructor(
     private val _deleteEvent = MutableStateFlow<DeleteEvent?>(null)
     val deleteEvent: StateFlow<DeleteEvent?> = _deleteEvent
 
+    /**
+     * Rolling log of recently processed files, newest first, shown live on the
+     * scan page so the user can see progress at the file level. Capped to a
+     * small window to stay light.
+     */
+    private val _processingLog = MutableStateFlow<List<String>>(emptyList())
+    val processingLog: StateFlow<List<String>> = _processingLog
+
     private var scanJob: Job? = null
 
     /** Start a scan if one isn't already running or complete. */
@@ -91,6 +106,7 @@ constructor(
 
     private fun scan() {
         val songs = musicRepository.library?.songs?.toList().orEmpty()
+        _processingLog.value = emptyList()
         if (songs.isEmpty()) {
             _scanState.value = ScanState.Results(emptyList())
             return
@@ -98,7 +114,7 @@ constructor(
 
         scanJob =
             viewModelScope.launch {
-                _scanState.value = ScanState.Scanning(0, songs.size)
+                _scanState.value = ScanState.Scanning(0, songs.size, null)
                 // Drop cache rows for songs no longer in the library so the DB
                 // doesn't grow without bound as the user's collection changes.
                 fingerprintRepository.prune(songs)
@@ -108,7 +124,7 @@ constructor(
                 // of concurrent decodes saturate most devices without
                 // starving the UI or the media session.
                 val semaphore = Semaphore(CONCURRENT_DECODES)
-                val fingerprints =
+                val results =
                     songs
                         .map { song ->
                             async {
@@ -117,7 +133,7 @@ constructor(
                                 // misses (new song, changed file, or bumped
                                 // algorithm version) fall through to analysis.
                                 val cached = fingerprintRepository.getCached(song)
-                                val fp =
+                                val result =
                                     if (cached != null) {
                                         cached
                                     } else {
@@ -126,26 +142,53 @@ constructor(
                                                 fingerprinter.fingerprint(
                                                     song.uri, song.durationMs)
                                             // Persist even an empty/failed result
-                                            // (empty array) so an unfingerprintable
-                                            // file isn't retried every scan.
-                                            fingerprintRepository.put(
-                                                song, computed ?: IntArray(0))
+                                            // so an unanalyzable file isn't retried
+                                            // every scan.
+                                            val toStore =
+                                                computed
+                                                    ?: FingerprintResult(
+                                                        IntArray(0), FloatArray(0))
+                                            fingerprintRepository.put(song, toStore)
                                             computed
                                         }
                                     }
                                 done++
-                                _scanState.value = ScanState.Scanning(done, songs.size)
-                                if (fp != null && fp.isNotEmpty()) song to fp else null
+                                val fileName = song.path.name ?: song.uri.toString()
+                                pushLog(fileName, cached != null)
+                                _scanState.value =
+                                    ScanState.Scanning(done, songs.size, fileName)
+                                if (result != null && result.fingerprint.isNotEmpty()) {
+                                    song to result
+                                } else {
+                                    null
+                                }
                             }
                         }
                         .awaitAll()
                         .filterNotNull()
                         .toMap()
 
-                L.d("Fingerprinted ${fingerprints.size}/${songs.size} songs")
-                val groups = duplicateFinder.find(fingerprints)
-                _scanState.value = ScanState.Results(groups)
+                L.d("Analyzed ${results.size}/${songs.size} songs")
+                val groups = duplicateFinder.find(results)
+
+                // Rank each group by TRUE quality (QualityAnalyzer), replacing
+                // the old bitrate-based "keep the biggest file" behavior.
+                val rankedGroups =
+                    groups.map { group ->
+                        val candidates =
+                            group.songs.map { song ->
+                                QualityAnalyzer.Candidate(
+                                    song, results[song]?.spectralProfile)
+                            }
+                        RankedGroup(qualityAnalyzer.rank(candidates), group.minSimilarity)
+                    }
+                _scanState.value = ScanState.Results(rankedGroups)
             }
+    }
+
+    private fun pushLog(fileName: String, cached: Boolean) {
+        val entry = if (cached) "$fileName (cached)" else fileName
+        _processingLog.value = (listOf(entry) + _processingLog.value).take(LOG_WINDOW)
     }
 
     fun delete(song: Song) {
@@ -176,14 +219,24 @@ constructor(
         val current = _scanState.value as? ScanState.Results ?: return
         val newGroups =
             current.groups.mapNotNull { group ->
-                val remaining = group.songs.filter { it != song }
+                val remaining = group.ranked.filter { it.song != song }
                 // A "group" of one is no longer a duplicate.
-                if (remaining.size >= 2) group.copy(songs = remaining) else null
+                if (remaining.size < 2) return@mapNotNull null
+                // If we removed the recommended-keep file, promote the new best
+                // (the next entry, already quality-ordered) as the keep.
+                val fixed =
+                    if (remaining.none { it.isRecommendedKeep }) {
+                        remaining.mapIndexed { index, r -> r.copy(isRecommendedKeep = index == 0) }
+                    } else {
+                        remaining
+                    }
+                group.copy(ranked = fixed)
             }
         _scanState.value = ScanState.Results(newGroups)
     }
 
     private companion object {
         const val CONCURRENT_DECODES = 2
+        const val LOG_WINDOW = 6
     }
 }
