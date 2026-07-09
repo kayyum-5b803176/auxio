@@ -20,6 +20,7 @@ package org.oxycblt.auxio.plugin.similarity
 
 import javax.inject.Inject
 import org.oxycblt.musikr.Song
+import timber.log.Timber as L
 
 /**
  * Records and queries the behavioral chain. Resolves songs to fingerprint-based
@@ -33,7 +34,14 @@ interface ChainRepository {
      * The link strength is weighted by that fraction, so good follows
      * accumulate strength and early-skipped follows barely register.
      */
-    suspend fun recordTransition(from: Song, to: Song, listenedFraction: Float)
+    suspend fun recordTransition(from: Song, to: Song, listenedFraction: Float, kind: String)
+
+    /**
+     * Note a jump-back (user tapped previous to replay [replayed]). A strong
+     * positive signal for that song. Phase 1 records it in the log for
+     * visibility; it does not yet feed a per-song score.
+     */
+    suspend fun logJumpBack(replayed: Song)
 
     /**
      * Proven followers of [song], strongest first — the pool manual play picks
@@ -56,18 +64,39 @@ class ChainRepositoryImpl
 constructor(
     private val dao: ChainDao,
     private val fingerprintRepository: FingerprintRepository,
-    private val musicRepository: org.oxycblt.auxio.music.MusicRepository
+    private val musicRepository: org.oxycblt.auxio.music.MusicRepository,
+    private val chainLog: ChainLog
 ) : ChainRepository {
 
     private suspend fun keyOf(song: Song): String? {
-        val result = fingerprintRepository.getCached(song) ?: return null
-        return ChainKey.of(result.fingerprint)
+        // Prefer a fingerprint-based key (survives duplicate-deletion and format
+        // changes). Fall back to the song's UID when no fingerprint is cached
+        // yet (e.g. the user hasn't run a duplicate scan) so the chain still
+        // works immediately — it just won't share nodes across duplicate files
+        // until they've been fingerprinted.
+        val result = fingerprintRepository.getCached(song)
+        val fpKey = result?.let { ChainKey.of(it.fingerprint) }
+        if (fpKey != null) return fpKey
+        return "uid:" + song.uid.toString()
     }
 
-    override suspend fun recordTransition(from: Song, to: Song, listenedFraction: Float) {
-        val fromKey = keyOf(from) ?: return
-        val toKey = keyOf(to) ?: return
-        if (fromKey == toKey) return // don't chain a song to itself
+    override suspend fun recordTransition(
+        from: Song,
+        to: Song,
+        listenedFraction: Float,
+        kind: String
+    ) {
+        val fromKey = keyOf(from)
+        val toKey = keyOf(to)
+        L.d("SmartChain: recordTransition fromKey=$fromKey toKey=$toKey kind=$kind")
+        if (fromKey == null || toKey == null) {
+            L.w("SmartChain: null key, aborting")
+            return
+        }
+        if (fromKey == toKey) {
+            L.d("SmartChain: same key (same recording), not chaining to self")
+            return
+        }
 
         // Completion-weighted strength delta. An early skip contributes a small
         // NEGATIVE amount (mild discouragement), a full listen a full positive.
@@ -82,6 +111,20 @@ constructor(
                     strength = delta.coerceAtLeast(0f),
                     count = 1))
         }
+        val pct = (listenedFraction * 100).toInt()
+        val sign = if (delta >= 0) "+" else ""
+        val keyKind = if (fromKey.startsWith("uid:")) " [uid]" else ""
+        val line =
+            "$kind: ${nameOf(from)} → ${nameOf(to)}  " +
+                "(heard $pct%, link $sign${"%.2f".format(delta)})$keyKind"
+        L.d("SmartChain: writing log line -> $line")
+        chainLog.log(line)
+    }
+
+    private fun nameOf(song: Song): String = song.path.name ?: song.uri.toString()
+
+    override suspend fun logJumpBack(replayed: Song) {
+        chainLog.log("Jump-back ♥ ${nameOf(replayed)} (replayed — strong like)")
     }
 
     override suspend fun provenFollowers(song: Song): List<ChainRepository.FollowerSong> {

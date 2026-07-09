@@ -199,4 +199,5 @@
     <string name="set_key_find_duplicates" translatable="false">auxio_find_duplicates</string>
     <string name="set_key_priority_folders" translatable="false">auxio_priority_folders</string>
     <string name="set_key_smart_chain" translatable="false">auxio_smart_chain</string>
+    <string name="set_key_smart_chain_logs" translatable="false">auxio_smart_chain_logs</string>
 </resources>

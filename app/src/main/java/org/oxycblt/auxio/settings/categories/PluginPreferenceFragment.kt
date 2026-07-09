@@ -45,6 +45,10 @@ class PluginPreferenceFragment : BasePreferenceFragment(R.xml.preferences_plugin
                     .navigateSafe(
                         PluginPreferenceFragmentDirections.priorityFoldersSettings())
             }
+            getString(R.string.set_key_smart_chain_logs) -> {
+                findNavController()
+                    .navigateSafe(PluginPreferenceFragmentDirections.chainLogSettings())
+            }
         }
     }
 }

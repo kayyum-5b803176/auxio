@@ -20,4 +20,9 @@
         app:summary="@string/set_smart_chain_desc"
         app:title="@string/set_smart_chain" />
 
+    <org.oxycblt.auxio.settings.ui.WrappedDialogPreference
+        app:key="@string/set_key_smart_chain_logs"
+        app:summary="@string/set_smart_chain_logs_desc"
+        app:title="@string/set_smart_chain_logs" />
+
 </PreferenceScreen>

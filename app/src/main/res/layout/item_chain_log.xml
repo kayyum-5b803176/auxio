@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:paddingHorizontal="@dimen/spacing_medium"
+    android:paddingVertical="@dimen/spacing_small">
+
+    <TextView
+        android:id="@+id/chain_log_time"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="@dimen/spacing_medium"
+        android:fontFamily="monospace"
+        android:textAppearance="@style/TextAppearance.Auxio.LabelMedium"
+        android:textColor="?android:attr/textColorSecondary"
+        tools:text="14:32:07" />
+
+    <TextView
+        android:id="@+id/chain_log_message"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textAppearance="@style/TextAppearance.Auxio.BodyMedium"
+        tools:text="song-a.flac → song-b.mp3  (heard 100%, link +0.75)" />
+
+</LinearLayout>

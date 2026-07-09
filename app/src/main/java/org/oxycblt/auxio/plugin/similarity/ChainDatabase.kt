@@ -23,9 +23,11 @@ import androidx.room.Database
 import androidx.room.Entity
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
+import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
 import androidx.room.Update
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Persists the behavioral "chain": learned song→song transitions built purely
@@ -37,9 +39,14 @@ import androidx.room.Update
  * link survives duplicate-deletion and format changes: the *music* owns the
  * link, not the file. Two files of the same recording share one chain node.
  */
-@Database(entities = [ChainTransition::class], version = 1, exportSchema = false)
+@Database(
+    entities = [ChainTransition::class, ChainLogEntry::class],
+    version = 2,
+    exportSchema = false)
 abstract class ChainDatabase : RoomDatabase() {
     abstract fun chainDao(): ChainDao
+
+    abstract fun chainLogDao(): ChainLogDao
 }
 
 @Dao
@@ -83,4 +90,36 @@ data class ChainTransition(
     val toKey: String,
     val strength: Float,
     val count: Int
+)
+
+/**
+ * Persisted log of recent Smart Chain learning events, shown on the Logs page.
+ * Kept to the most recent [ChainLog.CAPACITY] rows and survives app restarts.
+ */
+@Dao
+interface ChainLogDao {
+    /** Newest first, capped — the exact list the Logs page renders. */
+    @Query("SELECT * FROM ChainLogEntry ORDER BY timestampMs DESC, id DESC LIMIT :limit")
+    fun recent(limit: Int): Flow<List<ChainLogEntry>>
+
+    @Insert suspend fun insert(entry: ChainLogEntry)
+
+    /**
+     * Trim to the newest [keep] rows after an insert, so the table can't grow
+     * without bound. Ordered by the same key the UI query uses.
+     */
+    @Query(
+        "DELETE FROM ChainLogEntry WHERE id NOT IN " +
+            "(SELECT id FROM ChainLogEntry ORDER BY timestampMs DESC, id DESC LIMIT :keep)")
+    suspend fun trimTo(keep: Int)
+
+    @Query("DELETE FROM ChainLogEntry") suspend fun nuke()
+}
+
+/** One persisted log line. [id] autogenerates; ordering uses timestamp then id. */
+@Entity
+data class ChainLogEntry(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val timestampMs: Long,
+    val message: String
 )

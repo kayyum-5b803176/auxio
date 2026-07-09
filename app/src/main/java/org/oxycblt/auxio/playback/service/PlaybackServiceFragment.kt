@@ -145,6 +145,7 @@ private constructor(
     // disabled, so these forwards are free in the stock configuration.
 
     override fun onIndexMoved(index: Int) {
+        L.d("SmartChain: PSF.onIndexMoved($index) -> tracker")
         playbackTracker.onSongChanged()
     }
 
@@ -154,6 +155,7 @@ private constructor(
         index: Int,
         isShuffled: Boolean
     ) {
+        L.d("SmartChain: PSF.onNewPlayback(index=$index) -> tracker")
         playbackTracker.onSongChanged()
     }
 

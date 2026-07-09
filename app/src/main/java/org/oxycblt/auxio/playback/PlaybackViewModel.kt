@@ -60,6 +60,7 @@ constructor(
     private val playbackSettings: PlaybackSettings,
     private val commandFactory: PlaybackCommand.Factory,
     private val listSettings: ListSettings,
+    private val playbackTracker: org.oxycblt.auxio.plugin.similarity.PlaybackTracker,
 ) : ViewModel(), PlaybackStateManager.Listener, PlaybackSettings.Listener {
     private var lastPositionJob: Job? = null
 
@@ -131,6 +132,7 @@ constructor(
     override fun onIndexMoved(index: Int) {
         L.d("Index moved, updating current song")
         _song.value = playbackManager.currentSong
+        playbackTracker.onSongChanged()
     }
 
     override fun onQueueChanged(queue: List<Song>, index: Int, change: QueueChange) {
@@ -156,11 +158,13 @@ constructor(
         _song.value = playbackManager.currentSong
         _parent.value = parent
         _isShuffled.value = isShuffled
+        playbackTracker.onSongChanged()
     }
 
     override fun onProgressionChanged(progression: Progression) {
         L.d("Player state changed, starting new position polling")
         _isPlaying.value = progression.isPlaying
+        playbackTracker.onProgression()
         // Still need to update the position now due to co-routine launch delays
         _positionDs.value = progression.calculateElapsedPositionMs().msToDs()
         // Replace the previous position co-routine with a new one that uses the new
@@ -169,7 +173,12 @@ constructor(
         lastPositionJob =
             viewModelScope.launch {
                 while (true) {
-                    _positionDs.value = progression.calculateElapsedPositionMs().msToDs()
+                    val posMs = progression.calculateElapsedPositionMs()
+                    _positionDs.value = posMs.msToDs()
+                    // Feed the live position to the Smart Chain tracker so the
+                    // listened-fraction at a song change is accurate (the
+                    // progression callback alone is too infrequent).
+                    playbackTracker.onPositionTick(posMs)
                     // Wait a deci-second for the next position tick.
                     delay(100)
                 }
@@ -448,12 +457,18 @@ constructor(
     /** Skip to the next [Song]. */
     fun next() {
         L.d("Skipping to next song")
+        // Signal explicit user intent so the Smart Chain tracker records this
+        // as a manual skip (rejection) rather than a natural completion.
+        playbackTracker.onUserNext()
         playbackManager.next()
     }
 
     /** Skip to the previous [Song]. */
     fun prev() {
         L.d("Skipping to previous song")
+        // Signal explicit user intent so the tracker treats a jump-back as a
+        // strong positive for the replayed song.
+        playbackTracker.onUserPrev()
         playbackManager.prev()
     }
 
