@@ -14,4 +14,10 @@
         app:summary="@string/set_priority_folders_desc"
         app:title="@string/set_priority_folders" />
 
+    <SwitchPreferenceCompat
+        app:defaultValue="false"
+        app:key="@string/set_key_smart_chain"
+        app:summary="@string/set_smart_chain_desc"
+        app:title="@string/set_smart_chain" />
+
 </PreferenceScreen>

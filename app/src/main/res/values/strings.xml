@@ -331,6 +331,8 @@
     <string name="dup_delete_priority_title">Delete a priority-folder file?</string>
     <string name="dup_delete_priority_desc">%1$s is inside a priority folder. Are you sure you want to permanently delete it?</string>
     <string name="dup_delete_priority_confirm">Delete anyway</string>
+    <string name="set_smart_chain">Smart chain</string>
+    <string name="set_smart_chain_desc">Learn which songs you play after others, and use it to pick what plays next. Manual play follows proven follow-ups; shuffle also explores new songs. Has no effect while disabled.</string>
     <string name="dup_scanning">Analyzing library for duplicates…</string>
     <string name="dup_scan_progress">Fingerprinted %1$d/%2$d songs</string>
     <string name="dup_none_found">No duplicates found. Every song in your library appears to be acoustically unique.</string>

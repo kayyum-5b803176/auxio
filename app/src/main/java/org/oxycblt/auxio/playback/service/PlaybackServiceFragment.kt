@@ -37,6 +37,7 @@ private constructor(
     context: Context,
     private val foregroundListener: ForegroundListener,
     private val playbackManager: PlaybackStateManager,
+    private val playbackTracker: org.oxycblt.auxio.plugin.similarity.PlaybackTracker,
     exoHolderFactory: ExoPlaybackStateHolder.Factory,
     sessionHolderFactory: MediaSessionHolder.Factory,
     widgetComponentFactory: WidgetComponent.Factory,
@@ -46,6 +47,7 @@ private constructor(
     @Inject
     constructor(
         private val playbackManager: PlaybackStateManager,
+        private val playbackTracker: org.oxycblt.auxio.plugin.similarity.PlaybackTracker,
         private val exoHolderFactory: ExoPlaybackStateHolder.Factory,
         private val sessionHolderFactory: MediaSessionHolder.Factory,
         private val widgetComponentFactory: WidgetComponent.Factory,
@@ -56,6 +58,7 @@ private constructor(
                 context,
                 foregroundListener,
                 playbackManager,
+                playbackTracker,
                 exoHolderFactory,
                 sessionHolderFactory,
                 widgetComponentFactory,
@@ -133,6 +136,30 @@ private constructor(
     }
 
     override fun onSessionEnded() {
+        playbackTracker.reset()
         foregroundListener.updateForeground(ForegroundListener.Change.MEDIA_SESSION)
+    }
+
+    // --- SMART CHAIN TRACKING ---
+    // The tracker itself no-ops entirely when the Smart Chain plugin is
+    // disabled, so these forwards are free in the stock configuration.
+
+    override fun onIndexMoved(index: Int) {
+        playbackTracker.onSongChanged()
+    }
+
+    override fun onNewPlayback(
+        parent: org.oxycblt.musikr.MusicParent?,
+        queue: List<org.oxycblt.musikr.Song>,
+        index: Int,
+        isShuffled: Boolean
+    ) {
+        playbackTracker.onSongChanged()
+    }
+
+    override fun onProgressionChanged(
+        progression: org.oxycblt.auxio.playback.state.Progression
+    ) {
+        playbackTracker.onProgression()
     }
 }

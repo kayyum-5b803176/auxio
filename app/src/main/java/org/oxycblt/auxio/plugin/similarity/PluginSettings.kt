@@ -49,12 +49,22 @@ interface PluginSettings : Settings<PluginSettings.Listener> {
      */
     var priorityFolderNames: List<String>
 
+    /**
+     * Whether the Smart Chain plugin is enabled — learns song→song transitions
+     * from listening and drives "what plays next". Strictly opt-in; when false,
+     * no playback observation or chain storage happens and queueing is stock.
+     */
+    val smartChainEnabled: Boolean
+
     interface Listener {
         /** Called when [similarityDetectionEnabled] changes. */
         fun onSimilarityDetectionChanged() {}
 
         /** Called when [priorityFolderNames] changes. */
         fun onPriorityFoldersChanged() {}
+
+        /** Called when [smartChainEnabled] changes. */
+        fun onSmartChainChanged() {}
     }
 }
 
@@ -86,12 +96,17 @@ class PluginSettingsImpl @Inject constructor(@ApplicationContext private val con
             }
         }
 
+    override val smartChainEnabled: Boolean
+        get() =
+            sharedPreferences.getBoolean(getString(R.string.set_key_smart_chain), false)
+
     override fun onSettingChanged(key: String, listener: PluginSettings.Listener) {
         when (key) {
             getString(R.string.set_key_similarity_detection) ->
                 listener.onSimilarityDetectionChanged()
             getString(R.string.set_key_priority_folders) ->
                 listener.onPriorityFoldersChanged()
+            getString(R.string.set_key_smart_chain) -> listener.onSmartChainChanged()
         }
     }
 }

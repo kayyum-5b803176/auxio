@@ -38,6 +38,8 @@ interface PluginModule {
     @Binds fun songDeleter(impl: SongDeleterImpl): SongDeleter
 
     @Binds fun fingerprintRepository(impl: FingerprintRepositoryImpl): FingerprintRepository
+
+    @Binds fun chainRepository(impl: ChainRepositoryImpl): ChainRepository
 }
 
 @Module
@@ -55,4 +57,14 @@ class PluginRoomModule {
 
     @Provides
     fun fingerprintDao(database: FingerprintDatabase) = database.fingerprintDao()
+
+    @Singleton
+    @Provides
+    fun chainDatabase(@ApplicationContext context: Context) =
+        Room.databaseBuilder(
+                context.applicationContext, ChainDatabase::class.java, "chain_cache.db")
+            .fallbackToDestructiveMigration()
+            .build()
+
+    @Provides fun chainDao(database: ChainDatabase) = database.chainDao()
 }
