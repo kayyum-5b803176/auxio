@@ -19,6 +19,7 @@
 package org.oxycblt.auxio.plugin.similarity
 
 import javax.inject.Inject
+import kotlin.random.Random
 import org.oxycblt.musikr.Song
 import timber.log.Timber as L
 
@@ -48,6 +49,28 @@ interface ChainRepository {
      * from. Empty if nothing has been learned yet (caller falls back).
      */
     suspend fun provenFollowers(song: Song): List<FollowerSong>
+
+    /**
+     * Produce a chain-aware ordering of [heap] (by heap index), starting at
+     * [startHeapIndex], for the player's shuffle order.
+     *
+     * The walk greedily follows the strongest proven follower of the current
+     * song that hasn't been placed yet. When a song has no unused proven
+     * follower, it falls back to a random unused song.
+     *
+     * @param explore When true (shuffle mode — exploit + explore), each step has
+     *   a probability of picking a random unused song instead of the top proven
+     *   follower, so new pairings get discovered. When false (normal play —
+     *   exploit only), proven followers are always preferred; randomness only
+     *   fills gaps.
+     * @return A permutation of `heap.indices` beginning with [startHeapIndex].
+     *   The identity order (0..n-1 rotated to start) if the chain is empty.
+     */
+    suspend fun chainOrdering(
+        heap: List<Song>,
+        startHeapIndex: Int,
+        explore: Boolean
+    ): IntArray
 
     /** Clear all learned chain data. */
     suspend fun clear()
@@ -147,6 +170,94 @@ constructor(
         }
     }
 
+    override suspend fun chainOrdering(
+        heap: List<Song>,
+        startHeapIndex: Int,
+        explore: Boolean
+    ): IntArray {
+        val n = heap.size
+        if (n <= 1) return IntArray(n) { it }
+        val start = startHeapIndex.coerceIn(0, n - 1)
+
+        // Resolve every heap song to its chain key once. Map key -> list of heap
+        // indices sharing that key (duplicates collapse to one key).
+        val keyOfIndex = arrayOfNulls<String>(n)
+        val indicesByKey = HashMap<String, MutableList<Int>>()
+        for (i in 0 until n) {
+            val k = keyOf(heap[i])
+            keyOfIndex[i] = k
+            if (k != null) indicesByKey.getOrPut(k) { mutableListOf() }.add(i)
+        }
+
+        val used = BooleanArray(n)
+        val order = IntArray(n)
+        order[0] = start
+        used[start] = true
+
+        // Cache followers per key across the walk (a key can recur only once as
+        // "current", but caching keeps it cheap and avoids re-querying).
+        val followerCache = HashMap<String, List<ChainTransition>>()
+
+        var current = start
+        for (pos in 1 until n) {
+            val next = pickNext(current, keyOfIndex, indicesByKey, used, explore, followerCache)
+            order[pos] = next
+            used[next] = true
+            current = next
+        }
+        return order
+    }
+
+    /**
+     * Choose the next heap index after [current]. Prefers the strongest proven
+     * follower of the current song that is still unused; when [explore] is on,
+     * sometimes takes a random unused song instead; and always falls back to a
+     * random unused song when no proven follower is available.
+     */
+    private suspend fun pickNext(
+        current: Int,
+        keyOfIndex: Array<String?>,
+        indicesByKey: Map<String, List<Int>>,
+        used: BooleanArray,
+        explore: Boolean,
+        followerCache: HashMap<String, List<ChainTransition>>
+    ): Int {
+        // Exploration: occasionally jump to a random unused song to discover new
+        // pairings (shuffle only).
+        if (explore && Random.nextFloat() < EXPLORE_PROBABILITY) {
+            return randomUnused(used)
+        }
+
+        val key = keyOfIndex[current]
+        if (key != null) {
+            val followers =
+                followerCache.getOrPut(key) {
+                    dao.followersOf(key).filter { it.strength > 0f }
+                }
+            // Strongest-first; take the first follower with an unused heap slot.
+            for (t in followers) {
+                val candidates = indicesByKey[t.toKey] ?: continue
+                val slot = candidates.firstOrNull { !used[it] } ?: continue
+                return slot
+            }
+        }
+        // No proven follower available: fall back to a random unused song.
+        return randomUnused(used)
+    }
+
+    private fun randomUnused(used: BooleanArray): Int {
+        // Reservoir pick over unused indices — O(n), no allocation of a list.
+        var chosen = -1
+        var seen = 0
+        for (i in used.indices) {
+            if (!used[i]) {
+                seen++
+                if (Random.nextInt(seen) == 0) chosen = i
+            }
+        }
+        return chosen
+    }
+
     override suspend fun clear() {
         dao.nuke()
     }
@@ -156,5 +267,9 @@ constructor(
         // negative strength contribution.
         const val SKIP_THRESHOLD = 0.25f
         const val STRENGTH_SCALE = 1.0f
+        // Chance, per step in shuffle mode, of exploring a random song instead
+        // of the top proven follower. Keeps shuffle fresh while still leaning on
+        // learned pairings the rest of the time.
+        const val EXPLORE_PROBABILITY = 0.30f
     }
 }

@@ -74,7 +74,9 @@ class ExoPlaybackStateHolder(
     private val commandFactory: PlaybackCommand.Factory,
     private val replayGainProcessor: ReplayGainAudioProcessor,
     private val musicRepository: MusicRepository,
-    private val imageSettings: ImageSettings
+    private val imageSettings: ImageSettings,
+    private val chainRepository: org.oxycblt.auxio.plugin.similarity.ChainRepository,
+    private val pluginSettings: org.oxycblt.auxio.plugin.similarity.PluginSettings
 ) :
     PlaybackStateHolder,
     Player.Listener,
@@ -250,6 +252,8 @@ class ExoPlaybackStateHolder(
                 ?.let { command.queue.indexOf(it) }
                 .also { check(it != -1) { "Start song not in queue" } }
         if (command.shuffled) {
+            // Seed with stock order immediately so playback can start without
+            // waiting on the (async) chain computation.
             player.setShuffleOrder(BetterShuffleOrder(command.queue.size, startIndex ?: -1))
         }
         val target = startIndex ?: player.currentTimeline.getFirstWindowIndex(command.shuffled)
@@ -257,18 +261,71 @@ class ExoPlaybackStateHolder(
         player.prepare()
         player.play()
         playbackManager.ack(this, StateAck.NewPlayback)
+        if (command.shuffled && pluginSettings.smartChainEnabled) {
+            // Now that the start song is seeked, order the rest by the chain.
+            applyChainShuffleOrder(target)
+        }
         deferSave()
     }
 
     override fun shuffled(shuffled: Boolean) {
         player.setShuffleModeEnabled(shuffled)
         if (player.shuffleModeEnabled) {
-            // Have to manually refresh the shuffle seed and anchor it to the new current songs
-            player.setShuffleOrder(
-                BetterShuffleOrder(player.mediaItemCount, player.currentMediaItemIndex))
+            if (pluginSettings.smartChainEnabled) {
+                // Smart Chain ON: order the shuffle by learned song→song
+                // transitions (exploit + explore) instead of pure random.
+                applyChainShuffleOrder()
+            } else {
+                // Stock behavior: refresh the shuffle seed anchored to the
+                // current song.
+                player.setShuffleOrder(
+                    BetterShuffleOrder(player.mediaItemCount, player.currentMediaItemIndex))
+            }
         }
         playbackManager.ack(this, StateAck.QueueReordered)
         deferSave()
+    }
+
+    /**
+     * Compute a chain-aware shuffle order off the main thread and apply it. The
+     * heavy work (Room lookups, key resolution) happens on IO; the player is
+     * only touched back on the main thread. Falls back to the stock random order
+     * on any failure so shuffle never breaks.
+     */
+    private fun applyChainShuffleOrder(explicitStartIndex: Int? = null) {
+        val count = player.mediaItemCount
+        val startHeapIndex = explicitStartIndex ?: player.currentMediaItemIndex
+        if (count <= 1) {
+            player.setShuffleOrder(BetterShuffleOrder(count, startHeapIndex))
+            return
+        }
+        val heap = (0 until count).mapNotNull { player.getMediaItemAt(it).song }
+        if (heap.size != count) {
+            // Some items didn't resolve to songs; use stock ordering to be safe.
+            player.setShuffleOrder(BetterShuffleOrder(count, startHeapIndex))
+            return
+        }
+        saveScope.launch {
+            val order =
+                try {
+                    // explore = true: shuffle mode discovers new pairings.
+                    chainRepository.chainOrdering(heap, startHeapIndex, explore = true)
+                } catch (e: Exception) {
+                    L.e("SmartChain: chain shuffle ordering failed, using stock: $e")
+                    null
+                }
+            withContext(Dispatchers.Main) {
+                // Re-check state hasn't changed underneath us.
+                if (player.shuffleModeEnabled && player.mediaItemCount == count) {
+                    if (order != null && order.size == count) {
+                        player.setShuffleOrder(BetterShuffleOrder(order))
+                    } else {
+                        player.setShuffleOrder(BetterShuffleOrder(count, startHeapIndex))
+                    }
+                    playbackManager.ack(this@ExoPlaybackStateHolder, StateAck.QueueReordered)
+                }
+            }
+        }
     }
 
     override fun next() {
@@ -631,6 +688,8 @@ class ExoPlaybackStateHolder(
         private val replayGainProcessor: ReplayGainAudioProcessor,
         private val musicRepository: MusicRepository,
         private val imageSettings: ImageSettings,
+        private val chainRepository: org.oxycblt.auxio.plugin.similarity.ChainRepository,
+        private val pluginSettings: org.oxycblt.auxio.plugin.similarity.PluginSettings,
     ) {
         fun create(): ExoPlaybackStateHolder {
             // Since Auxio is a music player, only specify an audio renderer to save
@@ -671,7 +730,9 @@ class ExoPlaybackStateHolder(
                 commandFactory,
                 replayGainProcessor,
                 musicRepository,
-                imageSettings)
+                imageSettings,
+                chainRepository,
+                pluginSettings)
         }
     }
 
