@@ -69,4 +69,6 @@ class PluginRoomModule {
     @Provides fun chainDao(database: ChainDatabase) = database.chainDao()
 
     @Provides fun chainLogDao(database: ChainDatabase) = database.chainLogDao()
+
+    @Provides fun chainNodeDao(database: ChainDatabase) = database.chainNodeDao()
 }

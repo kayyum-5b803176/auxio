@@ -63,6 +63,13 @@ constructor(
     private var currentSong: Song? = null
     private var lastPositionMs: Long = 0L
 
+    // Bug-2 fix (deferred edge scoring): the A->B edge must be judged by how
+    // much of B actually played, which is only known when B itself ends. So we
+    // remember the song that preceded the current one; when the current song
+    // ends we finalize `pendingFrom -> currentSong` using the CURRENT song's
+    // heard fraction (not the outgoing-of-outgoing song's).
+    private var pendingFrom: Song? = null
+
     // The user's most recent explicit intent, and when it happened, so the next
     // song-change can be interpreted correctly:
     //  - NEXT tapped  -> the outgoing song was manually skipped (rejection,
@@ -164,8 +171,10 @@ constructor(
 
         val intent = consumeIntent()
         L.d("SmartChain: transition ${previous?.path?.name} -> ${newSong.path.name}, intent=$intent")
+
         if (previous != null) {
-            val heardFraction =
+            // How much of the OUTGOING song (`previous`) was actually heard.
+            val previousHeard =
                 if (previous.durationMs > 0) {
                     (lastPositionMs.toFloat() / previous.durationMs).coerceIn(0f, 1f)
                 } else {
@@ -174,37 +183,53 @@ constructor(
 
             when (intent) {
                 Intent.PREV -> {
-                    // Jump BACK: the user returned to replay a song — a strong
-                    // "I like this" signal for newSong. But the direction is
-                    // BACKWARD (newSong usually precedes `previous`), so
-                    // recording previous→newSong would pollute the chain with a
-                    // reversed link. Phase 1 stores only transitions, not
-                    // per-song scores, so we log the positive signal for
-                    // visibility but do not write a misleading backward edge.
-                    // (A per-song "liked" score is a natural future addition.)
-                    logJumpBack(newSong)
+                    // Bug-1 fix: a jump back only counts as a "like" for the song
+                    // returned to if the user had genuinely been listening to the
+                    // current song first — not an instant reflex tap. It's a
+                    // signal about the SONG (node), never a backward edge.
+                    if (previousHeard >= JUMP_BACK_MIN_HEARD) {
+                        recordLikeAsync(newSong, previousHeard)
+                    } else {
+                        L.d("SmartChain: jump-back ignored (only heard ${(previousHeard*100).toInt()}% first)")
+                    }
+                    // A PREV also abandons any pending forward edge — the user
+                    // didn't move forward, so there's no A->prev edge to finalize.
+                    pendingFrom = null
                 }
-                Intent.NEXT -> {
-                    // Manual skip: the user actively moved on. This is a
-                    // rejection of the outgoing song as a follow — recorded
-                    // with the (low) heard fraction, so an early skip yields a
-                    // strong negative and a late skip a mild one.
-                    recordAsync(previous, newSong, heardFraction, "Skip")
-                }
-                null -> {
-                    // Natural auto-advance: the song was allowed to finish, a
-                    // genuine completion. Use the heard fraction (≈1.0).
-                    recordAsync(previous, newSong, heardFraction, "Play")
+                else -> {
+                    // Forward move (manual skip or natural advance).
+                    //
+                    // Bug-2 fix: finalize the PENDING edge (pendingFrom ->
+                    // previous) now, using `previous`'s own heard fraction — this
+                    // is the correct measure of "was `previous` a good follow of
+                    // pendingFrom". This is the edge that was opened when we
+                    // started playing `previous`.
+                    val from = pendingFrom
+                    if (from != null && from != previous) {
+                        val kind = if (previousHeard < SKIP_HEARD) "Skip" else "Play"
+                        recordEdgeAsync(from, previous, previousHeard, kind)
+                    }
+                    // Also update `previous`'s own node score by how much of it
+                    // was heard (independent of context).
+                    recordPlayAsync(previous, previousHeard)
+
+                    // Open the next pending edge: previous -> newSong, to be
+                    // finalized when newSong ends and we know its heard fraction.
+                    pendingFrom = previous
                 }
             }
+        } else {
+            // First song of the session: nothing precedes it, so just open the
+            // pending slot when the NEXT song arrives (handled above next time).
+            pendingFrom = null
         }
 
         currentSong = newSong
         lastPositionMs = playbackManager.progression.calculateElapsedPositionMs()
     }
 
-    private fun recordAsync(from: Song, to: Song, fraction: Float, kind: String) {
-        L.d("SmartChain: recordAsync $kind ${from.path.name} -> ${to.path.name} frac=$fraction")
+    private fun recordEdgeAsync(from: Song, to: Song, fraction: Float, kind: String) {
+        L.d("SmartChain: recordEdge $kind ${from.path.name} -> ${to.path.name} frac=$fraction")
         scope.launch {
             try {
                 chainRepository.recordTransition(from, to, fraction, kind)
@@ -214,12 +239,22 @@ constructor(
         }
     }
 
-    private fun logJumpBack(replayed: Song) {
+    private fun recordPlayAsync(song: Song, fraction: Float) {
         scope.launch {
             try {
-                chainRepository.logJumpBack(replayed)
+                chainRepository.recordSongPlay(song, fraction)
             } catch (e: Exception) {
-                L.w("Failed to log jump-back: $e")
+                L.w("SmartChain: recordSongPlay failed: $e")
+            }
+        }
+    }
+
+    private fun recordLikeAsync(song: Song, contextHeard: Float) {
+        scope.launch {
+            try {
+                chainRepository.recordJumpBack(song, contextHeard)
+            } catch (e: Exception) {
+                L.w("SmartChain: recordJumpBack failed: $e")
             }
         }
     }
@@ -229,6 +264,7 @@ constructor(
         currentSong = null
         lastPositionMs = 0L
         lastIntent = null
+        pendingFrom = null
     }
 
     private companion object {
@@ -237,5 +273,14 @@ constructor(
         // between the tap and the resulting callback, but short enough that a
         // stale intent from a minute ago doesn't mislabel a later auto-advance.
         const val INTENT_WINDOW_MS = 5_000L
+
+        // A forward move counts as a real skip (vs a near-complete play) when
+        // less than this fraction of the outgoing song was heard.
+        const val SKIP_HEARD = 0.25f
+
+        // A jump-back only counts as a "like" for the returned-to song if at
+        // least this much of the song being abandoned had played first — so an
+        // instant reflex prev-tap doesn't register as a like.
+        const val JUMP_BACK_MIN_HEARD = 0.15f
     }
 }

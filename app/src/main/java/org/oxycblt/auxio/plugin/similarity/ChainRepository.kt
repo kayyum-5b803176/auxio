@@ -42,7 +42,19 @@ interface ChainRepository {
      * positive signal for that song. Phase 1 records it in the log for
      * visibility; it does not yet feed a per-song score.
      */
-    suspend fun logJumpBack(replayed: Song)
+    /**
+     * Fold a play observation into the song's own (node) score: [listenedFraction]
+     * near 1.0 is a positive signal, an early skip a negative one. Independent of
+     * whatever played before it.
+     */
+    suspend fun recordSongPlay(song: Song, listenedFraction: Float)
+
+    /**
+     * Record a jump-back "like" for [song] — the user deliberately returned to
+     * replay it. Feeds the song's node score, not any edge. [contextHeard] is how
+     * much of the abandoned song had played (for the log line only).
+     */
+    suspend fun recordJumpBack(song: Song, contextHeard: Float)
 
     /**
      * Proven followers of [song], strongest first — the pool manual play picks
@@ -86,6 +98,7 @@ class ChainRepositoryImpl
 @Inject
 constructor(
     private val dao: ChainDao,
+    private val nodeDao: ChainNodeDao,
     private val fingerprintRepository: FingerprintRepository,
     private val musicRepository: org.oxycblt.auxio.music.MusicRepository,
     private val chainLog: ChainLog
@@ -146,8 +159,56 @@ constructor(
 
     private fun nameOf(song: Song): String = song.path.name ?: song.uri.toString()
 
-    override suspend fun logJumpBack(replayed: Song) {
-        chainLog.log("Jump-back ♥ ${nameOf(replayed)} (replayed — strong like)")
+    override suspend fun recordSongPlay(song: Song, listenedFraction: Float) {
+        val key = keyOf(song) ?: return
+        // A completion contributes positively; an early skip negatively. Scaled
+        // the same way as edges for consistency.
+        val delta = (listenedFraction - SKIP_THRESHOLD) * STRENGTH_SCALE
+        val isSkip = listenedFraction < SKIP_THRESHOLD
+        foldNode(
+            key = key,
+            posDelta = if (delta > 0) delta else 0f,
+            negDelta = if (delta < 0) -delta else 0f,
+            playInc = if (isSkip) 0 else 1,
+            skipInc = if (isSkip) 1 else 0,
+            likeInc = 0)
+    }
+
+    override suspend fun recordJumpBack(song: Song, contextHeard: Float) {
+        val key = keyOf(song) ?: return
+        foldNode(
+            key = key,
+            posDelta = JUMP_BACK_BONUS,
+            negDelta = 0f,
+            playInc = 0,
+            skipInc = 0,
+            likeInc = 1)
+        val keyKind = if (key.startsWith("uid:")) " [uid]" else ""
+        chainLog.log("Jump-back ♥ ${nameOf(song)} (replayed — +$JUMP_BACK_BONUS like)$keyKind")
+    }
+
+    /** Fold a node observation, inserting the row first if it doesn't exist. */
+    private suspend fun foldNode(
+        key: String,
+        posDelta: Float,
+        negDelta: Float,
+        playInc: Int,
+        skipInc: Int,
+        likeInc: Int
+    ) {
+        val now = System.currentTimeMillis()
+        val updated = nodeDao.fold(key, posDelta, negDelta, playInc, skipInc, likeInc, now)
+        if (updated == 0) {
+            nodeDao.insert(
+                ChainSongScore(
+                    key = key,
+                    positiveScore = posDelta,
+                    negativeScore = negDelta,
+                    playCount = playInc,
+                    skipCount = skipInc,
+                    jumpBackCount = likeInc,
+                    lastUpdatedMs = now))
+        }
     }
 
     override suspend fun provenFollowers(song: Song): List<ChainRepository.FollowerSong> {
@@ -260,6 +321,7 @@ constructor(
 
     override suspend fun clear() {
         dao.nuke()
+        nodeDao.nuke()
     }
 
     private companion object {
@@ -267,6 +329,8 @@ constructor(
         // negative strength contribution.
         const val SKIP_THRESHOLD = 0.25f
         const val STRENGTH_SCALE = 1.0f
+        // Positive node-score bump for a deliberate jump-back replay.
+        const val JUMP_BACK_BONUS = 1.0f
         // Chance, per step in shuffle mode, of exploring a random song instead
         // of the top proven follower. Keeps shuffle fresh while still leaning on
         // learned pairings the rest of the time.

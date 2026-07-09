@@ -40,13 +40,15 @@ import kotlinx.coroutines.flow.Flow
  * link, not the file. Two files of the same recording share one chain node.
  */
 @Database(
-    entities = [ChainTransition::class, ChainLogEntry::class],
-    version = 2,
+    entities = [ChainTransition::class, ChainLogEntry::class, ChainSongScore::class],
+    version = 3,
     exportSchema = false)
 abstract class ChainDatabase : RoomDatabase() {
     abstract fun chainDao(): ChainDao
 
     abstract fun chainLogDao(): ChainLogDao
+
+    abstract fun chainNodeDao(): ChainNodeDao
 }
 
 @Dao
@@ -122,4 +124,64 @@ data class ChainLogEntry(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val timestampMs: Long,
     val message: String
+)
+
+/**
+ * Per-SONG (node) scoring, independent of what played before it — "is this song
+ * good on its own", as opposed to [ChainTransition] which is "does B follow A
+ * well". Keyed on the song's [ChainKey].
+ */
+@Dao
+interface ChainNodeDao {
+    @Query("SELECT * FROM ChainSongScore WHERE key = :key LIMIT 1")
+    suspend fun get(key: String): ChainSongScore?
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insert(score: ChainSongScore)
+
+    /**
+     * Fold a play observation into a song's node score: add [posDelta] to its
+     * positive score and [negDelta] to its negative score, bump play/skip/like
+     * counters, and stamp the time. Returns rows affected (0 if the row doesn't
+     * exist yet — caller then inserts).
+     */
+    @Query(
+        "UPDATE ChainSongScore SET " +
+            "positiveScore = positiveScore + :posDelta, " +
+            "negativeScore = negativeScore + :negDelta, " +
+            "playCount = playCount + :playInc, " +
+            "skipCount = skipCount + :skipInc, " +
+            "jumpBackCount = jumpBackCount + :likeInc, " +
+            "lastUpdatedMs = :now " +
+            "WHERE key = :key")
+    suspend fun fold(
+        key: String,
+        posDelta: Float,
+        negDelta: Float,
+        playInc: Int,
+        skipInc: Int,
+        likeInc: Int,
+        now: Long
+    ): Int
+
+    @Query("DELETE FROM ChainSongScore") suspend fun nuke()
+}
+
+/**
+ * A song's standalone score.
+ *
+ * @param positiveScore Accumulated liking (full plays, jump-backs).
+ * @param negativeScore Accumulated rejection (fast skips).
+ * @param playCount How many times the song was played through meaningfully.
+ * @param skipCount How many times it was skipped early.
+ * @param jumpBackCount How many times the user jumped back to replay it.
+ */
+@Entity
+data class ChainSongScore(
+    @PrimaryKey val key: String,
+    val positiveScore: Float,
+    val negativeScore: Float,
+    val playCount: Int,
+    val skipCount: Int,
+    val jumpBackCount: Int,
+    val lastUpdatedMs: Long
 )
