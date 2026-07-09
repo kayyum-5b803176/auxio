@@ -38,7 +38,12 @@ import timber.log.Timber as L
  * @author Alexander Capehart (OxygenCobalt)
  */
 @HiltViewModel
-class QueueViewModel @Inject constructor(private val playbackManager: PlaybackStateManager) :
+class QueueViewModel
+@Inject
+constructor(
+    private val playbackManager: PlaybackStateManager,
+    private val playbackTracker: org.oxycblt.auxio.plugin.similarity.PlaybackTracker
+) :
     ViewModel(), PlaybackStateManager.Listener {
 
     private val _queue = MutableStateFlow(listOf<Song>())
@@ -118,6 +123,8 @@ class QueueViewModel @Inject constructor(private val playbackManager: PlaybackSt
             return
         }
         L.d("Going to position $adapterIndex in queue")
+        // Tapping a queue item is a deliberate song choice for Smart Chain.
+        playbackTracker.onUserSelect()
         playbackManager.goto(adapterIndex)
     }
 

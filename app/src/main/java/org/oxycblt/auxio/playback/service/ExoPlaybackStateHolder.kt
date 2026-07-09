@@ -263,7 +263,10 @@ class ExoPlaybackStateHolder(
         playbackManager.ack(this, StateAck.NewPlayback)
         if (command.shuffled && pluginSettings.smartChainEnabled) {
             // Now that the start song is seeked, order the rest by the chain.
-            applyChainShuffleOrder(target)
+            // USER-SELECTED seed song -> pure exploit (no randomness): they
+            // chose the starting point; follow proven chains strictly.
+            // No seed (shuffle-all) -> minor exploration to discover pairings.
+            applyChainShuffleOrder(target, explore = command.song == null)
         }
         deferSave()
     }
@@ -272,9 +275,9 @@ class ExoPlaybackStateHolder(
         player.setShuffleModeEnabled(shuffled)
         if (player.shuffleModeEnabled) {
             if (pluginSettings.smartChainEnabled) {
-                // Smart Chain ON: order the shuffle by learned song→song
-                // transitions (exploit + explore) instead of pure random.
-                applyChainShuffleOrder()
+                // Smart Chain ON: shuffle button = learned order with minor
+                // exploration.
+                applyChainShuffleOrder(explore = true)
             } else {
                 // Stock behavior: refresh the shuffle seed anchored to the
                 // current song.
@@ -292,7 +295,10 @@ class ExoPlaybackStateHolder(
      * only touched back on the main thread. Falls back to the stock random order
      * on any failure so shuffle never breaks.
      */
-    private fun applyChainShuffleOrder(explicitStartIndex: Int? = null) {
+    private fun applyChainShuffleOrder(
+        explicitStartIndex: Int? = null,
+        explore: Boolean = true
+    ) {
         val count = player.mediaItemCount
         val startHeapIndex = explicitStartIndex ?: player.currentMediaItemIndex
         if (count <= 1) {
@@ -308,8 +314,7 @@ class ExoPlaybackStateHolder(
         saveScope.launch {
             val order =
                 try {
-                    // explore = true: shuffle mode discovers new pairings.
-                    chainRepository.chainOrdering(heap, startHeapIndex, explore = true)
+                    chainRepository.chainOrdering(heap, startHeapIndex, explore = explore)
                 } catch (e: Exception) {
                     L.e("SmartChain: chain shuffle ordering failed, using stock: $e")
                     null

@@ -41,7 +41,7 @@ import kotlinx.coroutines.flow.Flow
  */
 @Database(
     entities = [ChainTransition::class, ChainLogEntry::class, ChainSongScore::class],
-    version = 3,
+    version = 4,
     exportSchema = false)
 abstract class ChainDatabase : RoomDatabase() {
     abstract fun chainDao(): ChainDao
@@ -69,29 +69,25 @@ interface ChainDao {
 
     @Update suspend fun update(t: ChainTransition)
 
-    /** Reinforce an existing link or create it, adding [delta] to its strength. */
-    @Query(
-        "UPDATE ChainTransition SET strength = strength + :delta, count = count + 1 " +
-            "WHERE fromKey = :fromKey AND toKey = :toKey")
-    suspend fun reinforce(fromKey: String, toKey: String, delta: Float): Int
-
     @Query("DELETE FROM ChainTransition") suspend fun nuke()
 }
 
 /**
  * One learned transition edge: after music [fromKey], music [toKey] was played.
  *
- * @param strength Accumulated, completion-weighted link strength. Higher = a
- *   more-proven follow. Grows when the follow is listened to fully, barely
- *   moves (or is added negatively) when the follow is skipped early.
- * @param count How many times this transition occurred (for diagnostics/decay).
+ * @param strength Time-decayed, completion-weighted link strength, clamped to
+ *   [ChainRepositoryImpl] bounds. Grows on good follows, shrinks fast on skips,
+ *   and decays toward zero as it ages so RECENT behavior dominates.
+ * @param count How many times this transition occurred (for diagnostics).
+ * @param lastUpdatedMs When the edge last changed — the anchor for time decay.
  */
 @Entity(primaryKeys = ["fromKey", "toKey"])
 data class ChainTransition(
     val fromKey: String,
     val toKey: String,
     val strength: Float,
-    val count: Int
+    val count: Int,
+    val lastUpdatedMs: Long
 )
 
 /**
@@ -135,6 +131,10 @@ data class ChainLogEntry(
 interface ChainNodeDao {
     @Query("SELECT * FROM ChainSongScore WHERE key = :key LIMIT 1")
     suspend fun get(key: String): ChainSongScore?
+
+    /** Batch fetch for ordering: node scores for every key in [keys]. */
+    @Query("SELECT * FROM ChainSongScore WHERE key IN (:keys)")
+    suspend fun getAll(keys: List<String>): List<ChainSongScore>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insert(score: ChainSongScore)
 

@@ -70,14 +70,20 @@ constructor(
     // heard fraction (not the outgoing-of-outgoing song's).
     private var pendingFrom: Song? = null
 
+    // Whether the CURRENT song was deliberately chosen by the user (tapped in
+    // the library/queue) rather than arriving by auto-advance or skip. A
+    // user-chosen follow that is then actually listened to is the strongest
+    // possible "B goes after A" signal, and earns a bonus when the pending edge
+    // is finalized.
+    private var currentWasSelected: Boolean = false
+
     // The user's most recent explicit intent, and when it happened, so the next
     // song-change can be interpreted correctly:
-    //  - NEXT tapped  -> the outgoing song was manually skipped (rejection,
-    //                    strength scaled down by how little was heard).
-    //  - PREV tapped  -> a deliberate jump back to replay (strong positive for
-    //                    the song jumped TO).
-    //  - null / stale -> a natural auto-advance (completion).
-    private enum class Intent { NEXT, PREV }
+    //  - NEXT tapped   -> the outgoing song was manually skipped.
+    //  - PREV tapped   -> a deliberate jump back to replay.
+    //  - SELECT tapped -> the user chose a specific song to play now.
+    //  - null / stale  -> a natural auto-advance (completion).
+    private enum class Intent { NEXT, PREV, SELECT }
     private var lastIntent: Intent? = null
     private var lastIntentAtMs: Long = 0L
 
@@ -106,6 +112,19 @@ constructor(
         L.d("SmartChain: onUserPrev (enabled=${pluginSettings.smartChainEnabled})")
         if (!pluginSettings.smartChainEnabled) return
         lastIntent = Intent.PREV
+        lastIntentAtMs = System.currentTimeMillis()
+    }
+
+    /**
+     * Called when the user deliberately picks a specific song to play (tapping
+     * it in the library, a detail screen, or the queue). The strongest "play
+     * this now" signal — the resulting edge gets a bonus if the chosen song is
+     * then actually listened to.
+     */
+    fun onUserSelect() {
+        L.d("SmartChain: onUserSelect (enabled=${pluginSettings.smartChainEnabled})")
+        if (!pluginSettings.smartChainEnabled) return
+        lastIntent = Intent.SELECT
         lastIntentAtMs = System.currentTimeMillis()
     }
 
@@ -195,9 +214,11 @@ constructor(
                     // A PREV also abandons any pending forward edge — the user
                     // didn't move forward, so there's no A->prev edge to finalize.
                     pendingFrom = null
+                    currentWasSelected = false
                 }
                 else -> {
-                    // Forward move (manual skip or natural advance).
+                    // Forward move (manual skip, natural advance, or a user
+                    // song selection).
                     //
                     // Bug-2 fix: finalize the PENDING edge (pendingFrom ->
                     // previous) now, using `previous`'s own heard fraction — this
@@ -206,7 +227,15 @@ constructor(
                     // started playing `previous`.
                     val from = pendingFrom
                     if (from != null && from != previous) {
-                        val kind = if (previousHeard < SKIP_HEARD) "Skip" else "Play"
+                        val kind =
+                            when {
+                                previousHeard < SKIP_HEARD -> "Skip"
+                                // The finished song had been deliberately chosen
+                                // by the user AND was actually listened to — the
+                                // strongest positive follow signal.
+                                currentWasSelected -> "Select"
+                                else -> "Play"
+                            }
                         recordEdgeAsync(from, previous, previousHeard, kind)
                     }
                     // Also update `previous`'s own node score by how much of it
@@ -216,12 +245,14 @@ constructor(
                     // Open the next pending edge: previous -> newSong, to be
                     // finalized when newSong ends and we know its heard fraction.
                     pendingFrom = previous
+                    currentWasSelected = intent == Intent.SELECT
                 }
             }
         } else {
             // First song of the session: nothing precedes it, so just open the
             // pending slot when the NEXT song arrives (handled above next time).
             pendingFrom = null
+            currentWasSelected = intent == Intent.SELECT
         }
 
         currentSong = newSong
@@ -265,6 +296,7 @@ constructor(
         lastPositionMs = 0L
         lastIntent = null
         pendingFrom = null
+        currentWasSelected = false
     }
 
     private companion object {

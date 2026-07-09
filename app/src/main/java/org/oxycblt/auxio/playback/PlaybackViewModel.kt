@@ -237,6 +237,9 @@ constructor(
     }
 
     private fun playWithImpl(song: Song, with: PlaySong, shuffle: ShuffleMode) {
+        // The user deliberately chose this song — the strongest "play this now"
+        // signal for Smart Chain's edge learning.
+        playbackTracker.onUserSelect()
         when (with) {
             is PlaySong.FromAll -> playFromAllImpl(song, shuffle)
             is PlaySong.FromAlbum -> playFromAlbumImpl(song, shuffle)
