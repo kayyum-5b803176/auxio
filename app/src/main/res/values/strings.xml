@@ -323,6 +323,14 @@
     <string name="set_similarity_detection_desc">Acoustically fingerprint your library to find duplicate songs. Adds a "Find duplicates" entry to Library settings. Has no effect on the app while disabled.</string>
     <string name="set_find_duplicates">Find duplicates</string>
     <string name="set_find_duplicates_desc">Scan for files containing the same recording</string>
+    <string name="set_priority_folders">Priority folders</string>
+    <string name="set_priority_folders_desc">Folders whose files are preferred when removing duplicates, and protected with an extra delete confirmation</string>
+    <string name="set_priority_folders_dialog_desc">Enter folder names, one per line (e.g. export, import). Any file inside a folder with one of these names — anywhere in your storage — is treated as a priority file. Matching is case-insensitive.</string>
+    <string name="set_priority_folders_hint">Folder names, one per line</string>
+    <string name="dup_priority_lower_quality_warning">A priority-folder file was kept over a higher-quality copy. Review before deleting.</string>
+    <string name="dup_delete_priority_title">Delete a priority-folder file?</string>
+    <string name="dup_delete_priority_desc">%1$s is inside a priority folder. Are you sure you want to permanently delete it?</string>
+    <string name="dup_delete_priority_confirm">Delete anyway</string>
     <string name="dup_scanning">Analyzing library for duplicates…</string>
     <string name="dup_scan_progress">Fingerprinted %1$d/%2$d songs</string>
     <string name="dup_none_found">No duplicates found. Every song in your library appears to be acoustically unique.</string>

@@ -18,19 +18,33 @@
 
 package org.oxycblt.auxio.settings.categories
 
+import androidx.navigation.fragment.findNavController
 import dagger.hilt.android.AndroidEntryPoint
 import org.oxycblt.auxio.R
 import org.oxycblt.auxio.settings.BasePreferenceFragment
+import org.oxycblt.auxio.settings.ui.WrappedDialogPreference
+import org.oxycblt.auxio.util.navigateSafe
 
 /**
  * "Plugins" settings. Hosts opt-in toggles for experimental features. Each
  * plugin must be a strict no-op while its toggle is off — no background
  * work, no state, no change to stock behavior.
  *
- * Currently hosts the Similarity Detection plugin toggle; the toggle itself
- * needs no change handler here because the only entry point (the
- * "Find duplicates" preference) re-reads the flag every time the root
- * settings screen resumes.
+ * Hosts the Similarity Detection plugin toggle and the shared "Priority
+ * folders" configuration (a general folder-name feature future plugins can
+ * reuse). The similarity toggle itself needs no change handler here because
+ * its only entry point (the "Find duplicates" preference) re-reads the flag
+ * every time the root settings screen resumes.
  */
 @AndroidEntryPoint
-class PluginPreferenceFragment : BasePreferenceFragment(R.xml.preferences_plugin)
+class PluginPreferenceFragment : BasePreferenceFragment(R.xml.preferences_plugin) {
+    override fun onOpenDialogPreference(preference: WrappedDialogPreference) {
+        when (preference.key) {
+            getString(R.string.set_key_priority_folders) -> {
+                findNavController()
+                    .navigateSafe(
+                        PluginPreferenceFragmentDirections.priorityFoldersSettings())
+            }
+        }
+    }
+}

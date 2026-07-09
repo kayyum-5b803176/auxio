@@ -19,6 +19,7 @@
 package org.oxycblt.auxio.plugin.similarity
 
 import android.content.Context
+import androidx.core.content.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import org.oxycblt.auxio.R
@@ -36,9 +37,24 @@ interface PluginSettings : Settings<PluginSettings.Listener> {
     /** Whether the acoustic similarity detection (duplicate finder) plugin is enabled. */
     val similarityDetectionEnabled: Boolean
 
+    /**
+     * User-defined "priority" folder names (case-insensitive), e.g. "export",
+     * "import". A song is prioritized if any segment of its file path matches
+     * one of these names. Prioritized files are preferred as the "keep" in a
+     * duplicate group, and deleting a file inside one requires an extra
+     * confirmation.
+     *
+     * This is intentionally a general folder-name feature (not tied to
+     * similarity detection specifically) so future plugins can reuse it.
+     */
+    var priorityFolderNames: List<String>
+
     interface Listener {
         /** Called when [similarityDetectionEnabled] changes. */
         fun onSimilarityDetectionChanged() {}
+
+        /** Called when [priorityFolderNames] changes. */
+        fun onPriorityFoldersChanged() {}
     }
 }
 
@@ -50,9 +66,32 @@ class PluginSettingsImpl @Inject constructor(@ApplicationContext private val con
             sharedPreferences.getBoolean(
                 getString(R.string.set_key_similarity_detection), false)
 
+    override var priorityFolderNames: List<String>
+        get() =
+            sharedPreferences
+                .getStringSet(getString(R.string.set_key_priority_folders), emptySet())
+                .orEmpty()
+                // Stored as a set; present sorted for a stable UI order.
+                .sorted()
+        set(value) {
+            sharedPreferences.edit {
+                // Normalize: trim, drop blanks, de-duplicate case-insensitively.
+                val cleaned =
+                    value
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() }
+                        .distinctBy { it.lowercase() }
+                        .toSet()
+                putStringSet(getString(R.string.set_key_priority_folders), cleaned)
+            }
+        }
+
     override fun onSettingChanged(key: String, listener: PluginSettings.Listener) {
-        if (key == getString(R.string.set_key_similarity_detection)) {
-            listener.onSimilarityDetectionChanged()
+        when (key) {
+            getString(R.string.set_key_similarity_detection) ->
+                listener.onSimilarityDetectionChanged()
+            getString(R.string.set_key_priority_folders) ->
+                listener.onPriorityFoldersChanged()
         }
     }
 }

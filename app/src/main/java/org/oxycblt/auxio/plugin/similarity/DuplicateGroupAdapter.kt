@@ -66,7 +66,7 @@ class DuplicateGroupAdapter(private val listener: Listener) :
     ListAdapter<DuplicatesViewModel.RankedGroup, DuplicateGroupAdapter.GroupViewHolder>(DIFFER) {
 
     interface Listener {
-        fun onDeleteRequested(song: Song)
+        fun onDeleteRequested(song: Song, prioritized: Boolean)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
@@ -86,6 +86,10 @@ class DuplicateGroupAdapter(private val listener: Listener) :
             binding.duplicateGroupTitle.text =
                 context.getString(
                     R.string.dup_group_title, (group.minSimilarity * 100).toInt())
+
+            // Warning shown when a priority-folder file was kept over a
+            // higher-quality copy elsewhere, so the user can override manually.
+            binding.duplicateGroupWarning.isVisible = group.keptLowerQualityWarning
 
             binding.duplicateGroupSongs.removeAllViews()
             val inflater = LayoutInflater.from(context)
@@ -110,7 +114,7 @@ class DuplicateGroupAdapter(private val listener: Listener) :
                         .joinToString(" • ")
                 songBinding.duplicateSongPath.text = song.path.resolve(context)
                 songBinding.duplicateSongDelete.setOnClickListener {
-                    listener.onDeleteRequested(song)
+                    listener.onDeleteRequested(song, ranked.prioritized)
                 }
             }
         }

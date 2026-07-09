@@ -21,6 +21,18 @@
             android:layout_height="wrap_content"
             tools:text="Possible duplicate (96% audio match)" />
 
+        <TextView
+            android:id="@+id/duplicate_group_warning"
+            style="@style/TextAppearance.Auxio.LabelMedium"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/spacing_tiny"
+            android:drawablePadding="@dimen/spacing_small"
+            android:text="@string/dup_priority_lower_quality_warning"
+            android:textColor="?attr/colorError"
+            android:visibility="gone"
+            tools:visibility="visible" />
+
         <LinearLayout
             android:id="@+id/duplicate_group_songs"
             android:layout_width="match_parent"

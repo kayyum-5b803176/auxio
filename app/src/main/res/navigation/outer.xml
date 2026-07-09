@@ -47,7 +47,16 @@
     <fragment
         android:id="@+id/plugin_preferences_fragment"
         android:name="org.oxycblt.auxio.settings.categories.PluginPreferenceFragment"
-        android:label="plugin_preferences_fragment" />
+        android:label="plugin_preferences_fragment">
+        <action
+            android:id="@+id/priority_folders_settings"
+            app:destination="@id/priority_folders_dialog" />
+    </fragment>
+
+    <dialog
+        android:id="@+id/priority_folders_dialog"
+        android:name="org.oxycblt.auxio.plugin.similarity.PriorityFoldersDialog"
+        android:label="priority_folders_dialog" />
 
     <fragment
         android:id="@+id/duplicates_fragment"

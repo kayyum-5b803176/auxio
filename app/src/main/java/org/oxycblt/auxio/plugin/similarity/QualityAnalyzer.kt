@@ -46,16 +46,35 @@ import org.oxycblt.musikr.fs.Format
  */
 class QualityAnalyzer @Inject constructor() {
 
-    /** A song plus its analyzed spectral profile (may be null if analysis failed). */
-    data class Candidate(val song: Song, val spectralProfile: FloatArray?)
+    /**
+     * A song plus its analyzed spectral profile (null if analysis failed) and
+     * whether it sits in a user-defined priority folder.
+     */
+    data class Candidate(
+        val song: Song,
+        val spectralProfile: FloatArray?,
+        val prioritized: Boolean = false
+    )
 
     /** Ranking outcome for one file, with a structured explanation. */
     data class Ranked(
         val song: Song,
         val isRecommendedKeep: Boolean,
         /** Structured reason; the UI resolves it to a localized string (see Reason). */
-        val reason: Reason
+        val reason: Reason,
+        /** Whether this file is in a priority folder (affects delete confirmation). */
+        val prioritized: Boolean = false
     )
+
+    /**
+     * Result of ranking one duplicate group.
+     *
+     * @param ranked Files best-first; the first is the recommended keep.
+     * @param keptLowerQualityWarning True when a priority-folder file was kept
+     *   even though a higher-quality copy exists elsewhere — the UI surfaces
+     *   this so the user can override the automatic choice.
+     */
+    data class RankResult(val ranked: List<Ranked>, val keptLowerQualityWarning: Boolean)
 
     /**
      * Why a file landed where it did in the ranking. Structured (not a raw
@@ -97,10 +116,17 @@ class QualityAnalyzer @Inject constructor() {
      * Rank [candidates] (all members of one duplicate group) best-first.
      * The first entry is the recommended keep.
      */
-    fun rank(candidates: List<Candidate>): List<Ranked> {
-        if (candidates.isEmpty()) return emptyList()
+    fun rank(candidates: List<Candidate>): RankResult {
+        if (candidates.isEmpty()) return RankResult(emptyList(), false)
         if (candidates.size == 1) {
-            return listOf(Ranked(candidates[0].song, true, describeSingle(candidates[0])))
+            return RankResult(
+                listOf(
+                    Ranked(
+                        candidates[0].song,
+                        true,
+                        describeSingle(candidates[0]),
+                        candidates[0].prioritized)),
+                false)
         }
 
         // Cutoff frequency (kHz) per file: the highest frequency that still
@@ -131,37 +157,78 @@ class QualityAnalyzer @Inject constructor() {
             return relative || absolute
         }
 
-        val ranked =
-            candidates.sortedWith(
-                // 0. Fake-lossless files sink to the bottom.
-                compareBy<Candidate> { isFakeLossless(it) }
-                    // 1. True quality: higher cutoff frequency first — UNLESS
-                    //    everything is equivalent, in which case this is constant.
-                    .thenByDescending {
-                        if (spectrallyEquivalent) 0f else (cutoffs[it] ?: -1f)
-                    }
-                    // 2. Format design-intent tier (higher = more fidelity-oriented).
-                    .thenByDescending { formatTier(it.song.format) }
-                    // 3. Higher sample rate.
-                    .thenByDescending { it.song.sampleRateHz }
-                    // 4. Smaller file (only when quality is a genuine tie).
-                    .thenBy { it.song.size }
-                    // 5. Stable tiebreak.
-                    .thenBy { it.song.uid.hashCode() })
+        // The pure quality/format ranking, ignoring priority folders. Used both
+        // as the base order and to detect whether the priority override keeps a
+        // lower-quality file (the warning case).
+        val qualityComparator =
+            // 0. Fake-lossless files sink to the bottom.
+            compareBy<Candidate> { isFakeLossless(it) }
+                // 1. True quality: higher cutoff frequency first — UNLESS
+                //    everything is equivalent, in which case this is constant.
+                .thenByDescending { if (spectrallyEquivalent) 0f else (cutoffs[it] ?: -1f) }
+                // 2. Format design-intent tier (higher = more fidelity-oriented).
+                .thenByDescending { formatTier(it.song.format) }
+                // 3. Higher sample rate.
+                .thenByDescending { it.song.sampleRateHz }
+                // 4. Smaller file (only when quality is a genuine tie).
+                .thenBy { it.song.size }
+                // 5. Stable tiebreak.
+                .thenBy { it.song.uid.hashCode() }
+
+        val qualityBest = candidates.sortedWith(qualityComparator)
+
+        // Priority folders WIN the keep: a prioritized file is preferred as the
+        // keep even over a higher-quality copy elsewhere. Among prioritized
+        // files (or if none are prioritized) quality decides. We express this by
+        // sorting prioritized-first, then by the quality comparator.
+        val ranked = candidates.sortedWith(
+            compareByDescending<Candidate> { it.prioritized }.then(qualityComparator))
 
         val keep = ranked.first()
-        return ranked.map { candidate ->
-            Ranked(
-                song = candidate.song,
-                isRecommendedKeep = candidate === keep,
-                reason =
-                    describe(
-                        candidate,
-                        cutoffs[candidate] ?: -1f,
-                        maxCutoff,
-                        spectrallyEquivalent,
-                        candidate === keep))
-        }
+
+        // Warn when the priority override kept a file that ISN'T the pure
+        // quality winner — i.e. we kept a lower-quality file because it was in a
+        // priority folder. Only meaningful when the keep is actually prioritized.
+        val qualityWinner = qualityBest.first()
+        val keptLowerQuality =
+            keep.prioritized &&
+                keep !== qualityWinner &&
+                // Only "lower quality" if the quality winner genuinely beats it
+                // (not merely a stable-order difference among equivalents).
+                isStrictlyBetterQuality(qualityWinner, keep, cutoffs, ::isFakeLossless)
+
+        val rankedList =
+            ranked.map { candidate ->
+                Ranked(
+                    song = candidate.song,
+                    isRecommendedKeep = candidate === keep,
+                    reason =
+                        describe(
+                            candidate,
+                            cutoffs[candidate] ?: -1f,
+                            maxCutoff,
+                            spectrallyEquivalent,
+                            candidate === keep),
+                    prioritized = candidate.prioritized)
+            }
+        return RankResult(rankedList, keptLowerQuality)
+    }
+
+    /**
+     * True if [a] is meaningfully higher quality than [b] (not just a tiebreak
+     * difference): a higher measured cutoff, or [b] being fake-lossless while
+     * [a] isn't. Used to decide whether a priority override deserves a warning.
+     */
+    private fun isStrictlyBetterQuality(
+        a: Candidate,
+        b: Candidate,
+        cutoffs: Map<Candidate, Float>,
+        isFakeLossless: (Candidate) -> Boolean
+    ): Boolean {
+        if (!isFakeLossless(a) && isFakeLossless(b)) return true
+        val ca = cutoffs[a] ?: -1f
+        val cb = cutoffs[b] ?: -1f
+        return ca > cb + EQUIVALENCE_KHZ_MARGIN
     }
 
     /**

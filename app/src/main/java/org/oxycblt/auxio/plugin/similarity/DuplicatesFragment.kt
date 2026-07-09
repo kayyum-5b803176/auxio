@@ -86,7 +86,8 @@ class DuplicatesFragment : ViewBindingFragment<FragmentDuplicatesBinding>() {
         val adapter =
             DuplicateGroupAdapter(
                 object : DuplicateGroupAdapter.Listener {
-                    override fun onDeleteRequested(song: Song) = confirmDelete(song)
+                    override fun onDeleteRequested(song: Song, prioritized: Boolean) =
+                        confirmDelete(song, prioritized)
                 })
         binding.duplicatesRecycler.adapter = adapter
 
@@ -144,14 +145,35 @@ class DuplicatesFragment : ViewBindingFragment<FragmentDuplicatesBinding>() {
         duplicatesModel.scanIfNeeded()
     }
 
-    private fun confirmDelete(song: Song) {
+    private fun confirmDelete(song: Song, prioritized: Boolean) {
         MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.dup_delete_confirm_title)
             .setMessage(
                 getString(
                     R.string.dup_delete_confirm_desc, song.name.resolve(requireContext())))
             .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(R.string.dup_delete) { _, _ -> duplicatesModel.delete(song) }
+            .setPositiveButton(R.string.dup_delete) { _, _ ->
+                if (prioritized) {
+                    // This file is inside a priority folder — require a second,
+                    // explicit confirmation before deleting it.
+                    confirmDeletePriority(song)
+                } else {
+                    duplicatesModel.delete(song)
+                }
+            }
+            .show()
+    }
+
+    private fun confirmDeletePriority(song: Song) {
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.dup_delete_priority_title)
+            .setMessage(
+                getString(
+                    R.string.dup_delete_priority_desc, song.name.resolve(requireContext())))
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.dup_delete_priority_confirm) { _, _ ->
+                duplicatesModel.delete(song)
+            }
             .show()
     }
 }

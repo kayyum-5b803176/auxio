@@ -197,4 +197,5 @@
     <string name="set_key_plugins" translatable="false">auxio_plugins</string>
     <string name="set_key_similarity_detection" translatable="false">auxio_similarity_detection</string>
     <string name="set_key_find_duplicates" translatable="false">auxio_find_duplicates</string>
+    <string name="set_key_priority_folders" translatable="false">auxio_priority_folders</string>
 </resources>

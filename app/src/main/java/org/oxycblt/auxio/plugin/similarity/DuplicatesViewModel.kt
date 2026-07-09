@@ -52,13 +52,20 @@ constructor(
     private val fingerprintRepository: FingerprintRepository,
     private val duplicateFinder: DuplicateFinder,
     private val qualityAnalyzer: QualityAnalyzer,
+    private val pluginSettings: PluginSettings,
     private val songDeleter: SongDeleter
 ) : ViewModel() {
 
     /** A duplicate group with its files ranked by true quality (best first). */
     data class RankedGroup(
         val ranked: List<QualityAnalyzer.Ranked>,
-        val minSimilarity: Float
+        val minSimilarity: Float,
+        /**
+         * True when a priority-folder file was kept despite a higher-quality
+         * copy existing elsewhere — the UI shows a warning so the user can
+         * override the automatic choice.
+         */
+        val keptLowerQualityWarning: Boolean = false
     )
 
     sealed interface ScanState {
@@ -171,16 +178,27 @@ constructor(
                 L.d("Analyzed ${results.size}/${songs.size} songs")
                 val groups = duplicateFinder.find(results)
 
-                // Rank each group by TRUE quality (QualityAnalyzer), replacing
-                // the old bitrate-based "keep the biggest file" behavior.
+                // Priority folders: a snapshot of the user's configured names,
+                // read once per scan. Files under these folders are preferred as
+                // the "keep" and require an extra delete confirmation.
+                val priorityMatcher = PriorityMatcher(pluginSettings.priorityFolderNames)
+
+                // Rank each group by TRUE quality (QualityAnalyzer), with
+                // priority-folder files preferred as the keep.
                 val rankedGroups =
                     groups.map { group ->
                         val candidates =
                             group.songs.map { song ->
                                 QualityAnalyzer.Candidate(
-                                    song, results[song]?.spectralProfile)
+                                    song,
+                                    results[song]?.spectralProfile,
+                                    prioritized = priorityMatcher.isPrioritized(song))
                             }
-                        RankedGroup(qualityAnalyzer.rank(candidates), group.minSimilarity)
+                        val result = qualityAnalyzer.rank(candidates)
+                        RankedGroup(
+                            result.ranked,
+                            group.minSimilarity,
+                            result.keptLowerQualityWarning)
                     }
                 _scanState.value = ScanState.Results(rankedGroups)
             }

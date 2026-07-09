@@ -9,4 +9,9 @@
         app:summary="@string/set_similarity_detection_desc"
         app:title="@string/set_similarity_detection" />
 
+    <org.oxycblt.auxio.settings.ui.WrappedDialogPreference
+        app:key="@string/set_key_priority_folders"
+        app:summary="@string/set_priority_folders_desc"
+        app:title="@string/set_priority_folders" />
+
 </PreferenceScreen>
