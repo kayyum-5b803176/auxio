@@ -62,13 +62,24 @@ class PluginRoomModule {
     @Provides
     fun chainDatabase(@ApplicationContext context: Context) =
         Room.databaseBuilder(
-                context.applicationContext, ChainDatabase::class.java, "chain_cache.db")
-            .fallbackToDestructiveMigration()
+                // NOTE: new filename ("chain_vectors.db") for the embedding-model
+                // rewrite. The previous pairwise-edge DB ("chain_cache.db") used
+                // an incompatible schema; a one-time fresh start is unavoidable
+                // when replacing the entire algorithm. The old file is simply
+                // left orphaned (Android clears it on uninstall/clear-data).
+                context.applicationContext, ChainDatabase::class.java, "chain_vectors.db")
+            // POLICY: learned data must never be silently wiped by an app update.
+            // Only downgrades (sideloading an OLDER build over a newer DB) may
+            // reset, since backward migration is impossible. Any FUTURE schema
+            // change to ChainDatabase must ship an explicit Migration(from, to)
+            // via .addMigrations(...) — never a blanket destructive fallback for
+            // upgrades, and never another filename change (that orphans data).
+            .fallbackToDestructiveMigrationOnDowngrade()
             .build()
 
-    @Provides fun chainDao(database: ChainDatabase) = database.chainDao()
+    @Provides fun embeddingDao(database: ChainDatabase) = database.embeddingDao()
 
     @Provides fun chainLogDao(database: ChainDatabase) = database.chainLogDao()
 
-    @Provides fun chainNodeDao(database: ChainDatabase) = database.chainNodeDao()
+    @Provides fun qualityDao(database: ChainDatabase) = database.qualityDao()
 }

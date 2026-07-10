@@ -26,131 +26,119 @@ import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
-import androidx.room.Update
+import androidx.room.TypeConverter
+import androidx.room.TypeConverters
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Persists the behavioral "chain": learned song→song transitions built purely
- * from real listening. No library scanning, no acoustic comparison — a
- * transition is recorded when one song plays after another, weighted by how
- * much of the following song was actually listened to.
+ * Smart Chain storage — a song-EMBEDDING model, not a pairwise-edge model.
  *
- * Both endpoints are FINGERPRINT keys (see ChainKey), not file URIs/UIDs, so a
- * link survives duplicate-deletion and format changes: the *music* owns the
- * link, not the file. Two files of the same recording share one chain node.
+ * Every song has a small vector ([SongEmbedding]) in a shared latent space.
+ * "How similar are two songs" is just the distance between their vectors, so it
+ * works for ANY pair — observed or not — is symmetric by construction, and
+ * generalizes (if E is near B and B is near A, E tends to be near A). Learning
+ * nudges vectors together (a good follow) or apart (a skip); explicit user
+ * feedback is the same nudge with a bigger step.
+ *
+ * [SongQuality] is the standalone per-song score (liked / often skipped), used
+ * as a tie-breaker on top of similarity.
+ *
+ * Keys are [ChainKey]s (fingerprint-derived, with a uid: fallback), so the
+ * model is owned by the music, not the file.
  */
 @Database(
-    entities = [ChainTransition::class, ChainLogEntry::class, ChainSongScore::class],
-    version = 4,
+    entities = [SongEmbedding::class, SongQuality::class, ChainLogEntry::class],
+    version = 5,
     exportSchema = false)
+@TypeConverters(VectorConverter::class)
 abstract class ChainDatabase : RoomDatabase() {
-    abstract fun chainDao(): ChainDao
+    abstract fun embeddingDao(): EmbeddingDao
+
+    abstract fun qualityDao(): QualityDao
 
     abstract fun chainLogDao(): ChainLogDao
-
-    abstract fun chainNodeDao(): ChainNodeDao
 }
 
+// ---------------------------------------------------------------------------
+// Embeddings
+// ---------------------------------------------------------------------------
+
 @Dao
-interface ChainDao {
-    /**
-     * All learned followers of [fromKey], strongest first. These are the
-     * "proven followers" manual play chooses among.
-     */
-    @Query(
-        "SELECT * FROM ChainTransition WHERE fromKey = :fromKey ORDER BY strength DESC")
-    suspend fun followersOf(fromKey: String): List<ChainTransition>
+interface EmbeddingDao {
+    @Query("SELECT * FROM SongEmbedding WHERE key = :key LIMIT 1")
+    suspend fun get(key: String): SongEmbedding?
 
-    @Query(
-        "SELECT * FROM ChainTransition WHERE fromKey = :fromKey AND toKey = :toKey LIMIT 1")
-    suspend fun get(fromKey: String, toKey: String): ChainTransition?
+    /** Batch load for ordering — all embeddings for the given keys. */
+    @Query("SELECT * FROM SongEmbedding WHERE key IN (:keys)")
+    suspend fun getAll(keys: List<String>): List<SongEmbedding>
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insert(t: ChainTransition)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun put(embedding: SongEmbedding)
 
-    @Update suspend fun update(t: ChainTransition)
-
-    @Query("DELETE FROM ChainTransition") suspend fun nuke()
+    @Query("DELETE FROM SongEmbedding") suspend fun nuke()
 }
 
 /**
- * One learned transition edge: after music [fromKey], music [toKey] was played.
+ * A song's position in the latent space.
  *
- * @param strength Time-decayed, completion-weighted link strength, clamped to
- *   [ChainRepositoryImpl] bounds. Grows on good follows, shrinks fast on skips,
- *   and decays toward zero as it ages so RECENT behavior dominates.
- * @param count How many times this transition occurred (for diagnostics).
- * @param lastUpdatedMs When the edge last changed — the anchor for time decay.
+ * @param vector The latent coordinates (length [ChainRepositoryImpl.DIMENSIONS]).
+ * @param observationCount How many times this vector has been updated. Drives a
+ *   self-adjusting learning rate: young vectors move fast, established ones move
+ *   slowly (a soft, proportional "don't trust n=1").
+ * @param lastUpdatedMs For lazy realignment toward the content anchor over time.
  */
-@Entity(primaryKeys = ["fromKey", "toKey"])
-data class ChainTransition(
-    val fromKey: String,
-    val toKey: String,
-    val strength: Float,
-    val count: Int,
+@Entity
+data class SongEmbedding(
+    @PrimaryKey val key: String,
+    val vector: FloatArray,
+    val observationCount: Int,
     val lastUpdatedMs: Long
-)
+) {
+    // Room data class with an array member: override equals/hashCode by key
+    // (identity is the key; the array is payload).
+    override fun equals(other: Any?) = other is SongEmbedding && other.key == key
 
-/**
- * Persisted log of recent Smart Chain learning events, shown on the Logs page.
- * Kept to the most recent [ChainLog.CAPACITY] rows and survives app restarts.
- */
-@Dao
-interface ChainLogDao {
-    /** Newest first, capped — the exact list the Logs page renders. */
-    @Query("SELECT * FROM ChainLogEntry ORDER BY timestampMs DESC, id DESC LIMIT :limit")
-    fun recent(limit: Int): Flow<List<ChainLogEntry>>
-
-    @Insert suspend fun insert(entry: ChainLogEntry)
-
-    /**
-     * Trim to the newest [keep] rows after an insert, so the table can't grow
-     * without bound. Ordered by the same key the UI query uses.
-     */
-    @Query(
-        "DELETE FROM ChainLogEntry WHERE id NOT IN " +
-            "(SELECT id FROM ChainLogEntry ORDER BY timestampMs DESC, id DESC LIMIT :keep)")
-    suspend fun trimTo(keep: Int)
-
-    @Query("DELETE FROM ChainLogEntry") suspend fun nuke()
+    override fun hashCode() = key.hashCode()
 }
 
-/** One persisted log line. [id] autogenerates; ordering uses timestamp then id. */
-@Entity
-data class ChainLogEntry(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val timestampMs: Long,
-    val message: String
-)
+/** Stores a FloatArray as raw little-endian bytes for Room. */
+class VectorConverter {
+    @TypeConverter
+    fun fromBytes(bytes: ByteArray?): FloatArray {
+        if (bytes == null || bytes.isEmpty()) return FloatArray(0)
+        val fb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
+        return FloatArray(fb.remaining()).also { fb.get(it) }
+    }
 
-/**
- * Per-SONG (node) scoring, independent of what played before it — "is this song
- * good on its own", as opposed to [ChainTransition] which is "does B follow A
- * well". Keyed on the song's [ChainKey].
- */
+    @TypeConverter
+    fun toBytes(vector: FloatArray?): ByteArray {
+        if (vector == null || vector.isEmpty()) return ByteArray(0)
+        val bb = java.nio.ByteBuffer.allocate(vector.size * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        bb.asFloatBuffer().put(vector)
+        return bb.array()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Per-song quality (standalone standing)
+// ---------------------------------------------------------------------------
+
 @Dao
-interface ChainNodeDao {
-    @Query("SELECT * FROM ChainSongScore WHERE key = :key LIMIT 1")
-    suspend fun get(key: String): ChainSongScore?
+interface QualityDao {
+    @Query("SELECT * FROM SongQuality WHERE key = :key LIMIT 1")
+    suspend fun get(key: String): SongQuality?
 
-    /** Batch fetch for ordering: node scores for every key in [keys]. */
-    @Query("SELECT * FROM ChainSongScore WHERE key IN (:keys)")
-    suspend fun getAll(keys: List<String>): List<ChainSongScore>
+    @Query("SELECT * FROM SongQuality WHERE key IN (:keys)")
+    suspend fun getAll(keys: List<String>): List<SongQuality>
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insert(score: ChainSongScore)
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insert(score: SongQuality)
 
-    /**
-     * Fold a play observation into a song's node score: add [posDelta] to its
-     * positive score and [negDelta] to its negative score, bump play/skip/like
-     * counters, and stamp the time. Returns rows affected (0 if the row doesn't
-     * exist yet — caller then inserts).
-     */
     @Query(
-        "UPDATE ChainSongScore SET " +
+        "UPDATE SongQuality SET " +
             "positiveScore = positiveScore + :posDelta, " +
             "negativeScore = negativeScore + :negDelta, " +
             "playCount = playCount + :playInc, " +
             "skipCount = skipCount + :skipInc, " +
-            "jumpBackCount = jumpBackCount + :likeInc, " +
+            "likeCount = likeCount + :likeInc, " +
             "lastUpdatedMs = :now " +
             "WHERE key = :key")
     suspend fun fold(
@@ -163,25 +151,42 @@ interface ChainNodeDao {
         now: Long
     ): Int
 
-    @Query("DELETE FROM ChainSongScore") suspend fun nuke()
+    @Query("DELETE FROM SongQuality") suspend fun nuke()
 }
 
-/**
- * A song's standalone score.
- *
- * @param positiveScore Accumulated liking (full plays, jump-backs).
- * @param negativeScore Accumulated rejection (fast skips).
- * @param playCount How many times the song was played through meaningfully.
- * @param skipCount How many times it was skipped early.
- * @param jumpBackCount How many times the user jumped back to replay it.
- */
 @Entity
-data class ChainSongScore(
+data class SongQuality(
     @PrimaryKey val key: String,
     val positiveScore: Float,
     val negativeScore: Float,
     val playCount: Int,
     val skipCount: Int,
-    val jumpBackCount: Int,
+    val likeCount: Int,
     val lastUpdatedMs: Long
+)
+
+// ---------------------------------------------------------------------------
+// Log (unchanged; drives the existing Logs page)
+// ---------------------------------------------------------------------------
+
+@Dao
+interface ChainLogDao {
+    @Query("SELECT * FROM ChainLogEntry ORDER BY timestampMs DESC, id DESC LIMIT :limit")
+    fun recent(limit: Int): Flow<List<ChainLogEntry>>
+
+    @Insert suspend fun insert(entry: ChainLogEntry)
+
+    @Query(
+        "DELETE FROM ChainLogEntry WHERE id NOT IN " +
+            "(SELECT id FROM ChainLogEntry ORDER BY timestampMs DESC, id DESC LIMIT :keep)")
+    suspend fun trimTo(keep: Int)
+
+    @Query("DELETE FROM ChainLogEntry") suspend fun nuke()
+}
+
+@Entity
+data class ChainLogEntry(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val timestampMs: Long,
+    val message: String
 )
