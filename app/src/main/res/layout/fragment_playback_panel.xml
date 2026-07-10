@@ -144,4 +144,70 @@
 
     </org.oxycblt.auxio.playback.ui.ForcedLTRFrameLayout>
 
+    <!--
+      Zone Axis row: Language [Queue] Type — same visual row placement below the
+      prev/play/next controls. Hidden (GONE) by default; the fragment shows it
+      only when the Zone Axis plugin is enabled.
+    -->
+    <LinearLayout
+        android:id="@+id/playback_zone_row"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/spacing_medium"
+        android:layout_marginEnd="@dimen/spacing_medium"
+        android:layout_marginTop="@dimen/spacing_small"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/playback_controls_wrapper">
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/playback_zone_language_layout"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="@string/lbl_zone_language">
+
+            <com.google.android.material.textfield.MaterialAutoCompleteTextView
+                android:id="@+id/playback_zone_language"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/desc_zone_language"
+                android:inputType="none"
+                tools:ignore="LabelFor" />
+
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView
+            android:id="@+id/playback_zone_queue_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/spacing_small"
+            android:layout_marginEnd="@dimen/spacing_small"
+            android:text="@string/lbl_queue"
+            android:textAppearance="?attr/textAppearanceLabelMedium" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/playback_zone_type_layout"
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="@string/lbl_zone_type">
+
+            <com.google.android.material.textfield.MaterialAutoCompleteTextView
+                android:id="@+id/playback_zone_type"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:contentDescription="@string/desc_zone_type"
+                android:inputType="none"
+                tools:ignore="LabelFor" />
+
+        </com.google.android.material.textfield.TextInputLayout>
+
+    </LinearLayout>
+
 </androidx.constraintlayout.widget.ConstraintLayout>

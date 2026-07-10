@@ -200,4 +200,6 @@
     <string name="set_key_priority_folders" translatable="false">auxio_priority_folders</string>
     <string name="set_key_smart_chain" translatable="false">auxio_smart_chain</string>
     <string name="set_key_smart_chain_logs" translatable="false">auxio_smart_chain_logs</string>
+    <string name="set_key_zone_axis" translatable="false">auxio_zone_axis</string>
+    <string name="set_key_zone_axis_manage" translatable="false">auxio_zone_axis_manage</string>
 </resources>

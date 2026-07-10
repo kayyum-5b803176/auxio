@@ -56,6 +56,14 @@ interface PluginSettings : Settings<PluginSettings.Listener> {
      */
     val smartChainEnabled: Boolean
 
+    /**
+     * Whether the Zone Axis plugin is enabled — lets the user define Language
+     * and Type tag lists and assign one of each to songs, which Smart Chain can
+     * then filter by. Strictly opt-in; when false, the player tagging dropdowns
+     * are hidden and no zone data is read or written.
+     */
+    val zoneAxisEnabled: Boolean
+
     interface Listener {
         /** Called when [similarityDetectionEnabled] changes. */
         fun onSimilarityDetectionChanged() {}
@@ -65,6 +73,9 @@ interface PluginSettings : Settings<PluginSettings.Listener> {
 
         /** Called when [smartChainEnabled] changes. */
         fun onSmartChainChanged() {}
+
+        /** Called when [zoneAxisEnabled] changes. */
+        fun onZoneAxisChanged() {}
     }
 }
 
@@ -100,6 +111,10 @@ class PluginSettingsImpl @Inject constructor(@ApplicationContext private val con
         get() =
             sharedPreferences.getBoolean(getString(R.string.set_key_smart_chain), false)
 
+    override val zoneAxisEnabled: Boolean
+        get() =
+            sharedPreferences.getBoolean(getString(R.string.set_key_zone_axis), false)
+
     override fun onSettingChanged(key: String, listener: PluginSettings.Listener) {
         when (key) {
             getString(R.string.set_key_similarity_detection) ->
@@ -107,6 +122,7 @@ class PluginSettingsImpl @Inject constructor(@ApplicationContext private val con
             getString(R.string.set_key_priority_folders) ->
                 listener.onPriorityFoldersChanged()
             getString(R.string.set_key_smart_chain) -> listener.onSmartChainChanged()
+            getString(R.string.set_key_zone_axis) -> listener.onZoneAxisChanged()
         }
     }
 }

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/colorSurface"
+    android:transitionGroup="true"
+    tools:context=".plugin.similarity.ZoneAxisFragment">
+
+    <org.oxycblt.auxio.ui.CoordinatorAppBarLayout
+        android:id="@+id/zone_axis_appbar"
+        style="@style/Widget.Auxio.AppBarLayout"
+        app:liftOnScroll="true">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/zone_axis_toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:navigationIcon="@drawable/ic_back_24"
+            app:title="@string/set_zone_axis_manage" />
+
+    </org.oxycblt.auxio.ui.CoordinatorAppBarLayout>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/zone_axis_recycler"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:paddingVertical="@dimen/spacing_small"
+        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
+        app:layout_behavior="com.google.android.material.appbar.AppBarLayout$ScrollingViewBehavior"
+        tools:listitem="@layout/item_zone_value" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

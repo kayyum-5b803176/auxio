@@ -40,6 +40,8 @@ interface PluginModule {
     @Binds fun fingerprintRepository(impl: FingerprintRepositoryImpl): FingerprintRepository
 
     @Binds fun chainRepository(impl: ChainRepositoryImpl): ChainRepository
+
+    @Binds fun zoneAxisRepository(impl: ZoneAxisRepositoryImpl): ZoneAxisRepository
 }
 
 @Module
@@ -82,4 +84,17 @@ class PluginRoomModule {
     @Provides fun chainLogDao(database: ChainDatabase) = database.chainLogDao()
 
     @Provides fun qualityDao(database: ChainDatabase) = database.qualityDao()
+
+    @Singleton
+    @Provides
+    fun zoneAxisDatabase(@ApplicationContext context: Context) =
+        Room.databaseBuilder(
+                context.applicationContext, ZoneAxisDatabase::class.java, "zone_axis.db")
+            // Same policy as ChainDatabase: user-authored tags must never be
+            // silently wiped on upgrade. Future schema changes ship an explicit
+            // Migration; only downgrades may reset.
+            .fallbackToDestructiveMigrationOnDowngrade()
+            .build()
+
+    @Provides fun zoneAxisDao(database: ZoneAxisDatabase) = database.zoneAxisDao()
 }

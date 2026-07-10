@@ -49,6 +49,10 @@ class PluginPreferenceFragment : BasePreferenceFragment(R.xml.preferences_plugin
                 findNavController()
                     .navigateSafe(PluginPreferenceFragmentDirections.chainLogSettings())
             }
+            getString(R.string.set_key_zone_axis_manage) -> {
+                findNavController()
+                    .navigateSafe(PluginPreferenceFragmentDirections.zoneAxisSettings())
+            }
         }
     }
 }

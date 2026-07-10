@@ -123,6 +123,11 @@
     <string name="lbl_shuffle">Shuffle</string>
 
     <string name="lbl_queue">Queue</string>
+    <string name="lbl_zone_language">Language</string>
+    <string name="lbl_zone_type">Type</string>
+    <string name="lbl_zone_unset">—</string>
+    <string name="desc_zone_language">Assign a language to this song</string>
+    <string name="desc_zone_type">Assign a type to this song</string>
     <string name="lbl_play_next">Play next</string>
     <string name="lbl_queue_add">Add to queue</string>
 
@@ -333,6 +338,16 @@
     <string name="dup_delete_priority_confirm">Delete anyway</string>
     <string name="set_smart_chain">Smart chain</string>
     <string name="set_smart_chain_desc">Learn which songs you play after others, and use it to pick what plays next. Manual play follows proven follow-ups; shuffle also explores new songs. Has no effect while disabled.</string>
+    <string name="set_zone_axis">Zone axis</string>
+    <string name="set_zone_axis_desc">Define your own Language and Type lists and tag songs with them from the player. Smart Chain can then filter what plays next by language, type, or how often you play a song. Has no effect while disabled.</string>
+    <string name="set_zone_axis_manage">Manage zone axes</string>
+    <string name="set_zone_axis_manage_desc">Add, rename, or remove Language and Type values</string>
+    <string name="lbl_zone_add">Add value</string>
+    <string name="lbl_zone_delete">Delete value</string>
+    <string name="lbl_zone_add_title">Add to %1$s</string>
+    <string name="lbl_zone_rename_title">Rename value</string>
+    <string name="lbl_zone_value_hint">Value name</string>
+    <string name="lbl_zone_delete_confirm">Delete \"%1$s\"? It will be removed from %2$d song(s).</string>
     <string name="set_smart_chain_logs">Smart chain logs</string>
     <string name="set_smart_chain_logs_desc">See the most recent chain learning updates</string>
     <string name="set_smart_chain_logs_clear">Clear logs</string>
