@@ -24,14 +24,12 @@ import android.media.audiofx.AudioEffect
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.MenuItem
-import android.view.View
 import android.view.ViewTreeObserver
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.updatePadding
 import androidx.fragment.app.activityViewModels
-import androidx.fragment.app.viewModels
 import dagger.hilt.android.AndroidEntryPoint
 import org.oxycblt.auxio.R
 import org.oxycblt.auxio.databinding.FragmentPlaybackPanelBinding
@@ -42,14 +40,10 @@ import org.oxycblt.auxio.music.resolveNames
 import org.oxycblt.auxio.playback.state.RepeatMode
 import org.oxycblt.auxio.playback.ui.ControlledCoverView
 import org.oxycblt.auxio.playback.ui.StyledSeekBar
-import org.oxycblt.auxio.plugin.similarity.ZoneAxis
-import org.oxycblt.auxio.plugin.similarity.ZoneAxisValue
-import org.oxycblt.auxio.plugin.similarity.ZoneAxisViewModel
 import org.oxycblt.auxio.ui.ViewBindingFragment
 import org.oxycblt.auxio.util.collectImmediately
 import org.oxycblt.auxio.util.showToast
 import org.oxycblt.auxio.util.systemBarInsetsCompat
-import android.widget.ArrayAdapter
 import org.oxycblt.musikr.MusicParent
 import org.oxycblt.musikr.Song
 import timber.log.Timber as L
@@ -72,14 +66,8 @@ class PlaybackPanelFragment :
     private val playbackModel: PlaybackViewModel by activityViewModels()
     private val detailModel: DetailViewModel by activityViewModels()
     private val listModel: ListViewModel by activityViewModels()
-    private val zoneModel: ZoneAxisViewModel by viewModels()
     private var equalizerLauncher: ActivityResultLauncher<Intent>? = null
     private var lastCoverWidth = 0
-
-    // Cached current dropdown option lists, so a selection index maps back to a
-    // value id. Index 0 is always the "unset" (—) entry.
-    private var languageOptions: List<ZoneAxisValue> = emptyList()
-    private var typeOptions: List<ZoneAxisValue> = emptyList()
 
     override fun onCreateBinding(inflater: LayoutInflater) =
         FragmentPlaybackPanelBinding.inflate(inflater)
@@ -145,63 +133,6 @@ class PlaybackPanelFragment :
         collectImmediately(playbackModel.repeatMode, ::updateRepeat)
         collectImmediately(playbackModel.isPlaying, ::updatePlaying)
         collectImmediately(playbackModel.isShuffled, ::updateShuffled)
-
-        // --- ZONE AXIS (opt-in) ---
-        setUpZoneAxis(binding)
-    }
-
-    private fun setUpZoneAxis(binding: FragmentPlaybackPanelBinding) {
-        // Not present on shorter-height layout variants; nothing to wire up.
-        val row = binding.playbackZoneRow ?: return
-        // Entire row is hidden unless the Zone Axis plugin is enabled.
-        if (!zoneModel.enabled) {
-            row.visibility = View.GONE
-            return
-        }
-        row.visibility = View.VISIBLE
-
-        binding.playbackZoneLanguage?.setOnItemClickListener { _, _, position, _ ->
-            // position 0 == "unset"; otherwise map to the value at position-1.
-            val valueId = languageOptions.getOrNull(position - 1)?.id
-            zoneModel.assignLanguage(valueId)
-        }
-        binding.playbackZoneType?.setOnItemClickListener { _, _, position, _ ->
-            val valueId = typeOptions.getOrNull(position - 1)?.id
-            zoneModel.assignType(valueId)
-        }
-
-        collectImmediately(zoneModel.languageValues) { values ->
-            languageOptions = values
-            populateDropdown(binding, isLanguage = true)
-        }
-        collectImmediately(zoneModel.typeValues) { values ->
-            typeOptions = values
-            populateDropdown(binding, isLanguage = false)
-        }
-        collectImmediately(zoneModel.currentTag) { applyCurrentTag(binding) }
-    }
-
-    private fun populateDropdown(binding: FragmentPlaybackPanelBinding, isLanguage: Boolean) {
-        val context = requireContext()
-        val unset = getString(R.string.lbl_zone_unset)
-        val options = if (isLanguage) languageOptions else typeOptions
-        val labels = listOf(unset) + options.map { it.label }
-        val adapter =
-            ArrayAdapter(context, android.R.layout.simple_list_item_1, labels)
-        val view = if (isLanguage) binding.playbackZoneLanguage else binding.playbackZoneType
-        view?.setAdapter(adapter)
-        applyCurrentTag(binding)
-    }
-
-    private fun applyCurrentTag(binding: FragmentPlaybackPanelBinding) {
-        val tag = zoneModel.currentTag.value
-        val unset = getString(R.string.lbl_zone_unset)
-        val langLabel =
-            languageOptions.firstOrNull { it.id == tag?.languageValueId }?.label ?: unset
-        val typeLabel = typeOptions.firstOrNull { it.id == tag?.typeValueId }?.label ?: unset
-        // setText(..., false) updates the shown value without filtering the list.
-        binding.playbackZoneLanguage?.setText(langLabel, false)
-        binding.playbackZoneType?.setText(typeLabel, false)
     }
 
     override fun onStart() {
@@ -304,10 +235,6 @@ class PlaybackPanelFragment :
         binding.playbackArtist.text = song.artists.resolveNames(context)
         binding.playbackAlbum?.text = song.album.name.resolve(context)
         binding.playbackSeekBar?.durationDs = song.durationMs.msToDs()
-        // Refresh the zone dropdowns for the new song (no-op if plugin disabled).
-        if (zoneModel.enabled) {
-            zoneModel.onSongChanged(song)
-        }
     }
 
     private fun updateParent(parent: MusicParent?) {

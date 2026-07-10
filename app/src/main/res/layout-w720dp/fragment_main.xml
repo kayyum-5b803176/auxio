@@ -108,16 +108,66 @@
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toEndOf="@+id/playback_panel_fragment">
 
-                <TextView
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="64dp"
-                    android:gravity="center"
-                    android:text="@string/lbl_queue"
-                    android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
-                    android:textColor="?attr/colorOnSurfaceVariant"
-                    app:layout_constraintBottom_toBottomOf="@+id/handle"
-                    app:layout_constraintEnd_toEndOf="@+id/handle"
-                    app:layout_constraintStart_toStartOf="parent" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <!--
+                      Zone Axis: Language selector. Hidden (GONE) by default;
+                      shown only when the Zone Axis plugin is enabled. Shows
+                      just the current value ("All" when unset) — the axis
+                      name itself only appears as the popup menu's header
+                      while open.
+                    -->
+                    <TextView
+                        android:id="@+id/queue_zone_language"
+                        android:contentDescription="@string/desc_zone_language"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/spacing_medium"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center_vertical"
+                        android:paddingHorizontal="@dimen/spacing_small"
+                        android:paddingVertical="@dimen/spacing_small"
+                        android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:visibility="gone"
+                        tools:text="All ▾"
+                        tools:visibility="visible" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:text="@string/lbl_queue"
+                        android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
+                        android:textColor="?attr/colorOnSurfaceVariant" />
+
+                    <!-- Zone Axis: Type selector. Same behavior as Language above. -->
+                    <TextView
+                        android:id="@+id/queue_zone_type"
+                        android:contentDescription="@string/desc_zone_type"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="@dimen/spacing_medium"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center_vertical"
+                        android:paddingHorizontal="@dimen/spacing_small"
+                        android:paddingVertical="@dimen/spacing_small"
+                        android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:visibility="gone"
+                        tools:text="All ▾"
+                        tools:visibility="visible" />
+
+                </LinearLayout>
 
                 <androidx.fragment.app.FragmentContainerView
                     android:id="@+id/queue_fragment"

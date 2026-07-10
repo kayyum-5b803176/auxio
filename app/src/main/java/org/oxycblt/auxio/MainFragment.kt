@@ -20,14 +20,18 @@ package org.oxycblt.auxio
 
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.Menu
+import android.view.View
 import android.view.ViewTreeObserver
 import android.view.WindowInsets
+import android.widget.PopupMenu
 import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedCallback
 import androidx.core.view.ViewCompat
 import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import androidx.fragment.app.activityViewModels
+import androidx.fragment.app.viewModels
 import androidx.navigation.findNavController
 import androidx.navigation.fragment.findNavController
 import com.google.android.material.R as MR
@@ -56,6 +60,9 @@ import org.oxycblt.auxio.playback.OpenPanel
 import org.oxycblt.auxio.playback.PlaybackBottomSheetBehavior
 import org.oxycblt.auxio.playback.PlaybackViewModel
 import org.oxycblt.auxio.playback.queue.QueueBottomSheetBehavior
+import org.oxycblt.auxio.plugin.similarity.ZoneAxis
+import org.oxycblt.auxio.plugin.similarity.ZoneAxisValue
+import org.oxycblt.auxio.plugin.similarity.ZoneAxisViewModel
 import org.oxycblt.auxio.ui.DialogAwareNavigationListener
 import org.oxycblt.auxio.ui.UISettings
 import org.oxycblt.auxio.ui.ViewBindingFragment
@@ -87,6 +94,7 @@ class MainFragment :
     private val homeModel: HomeViewModel by activityViewModels()
     private val listModel: ListViewModel by activityViewModels()
     private val playbackModel: PlaybackViewModel by activityViewModels()
+    private val zoneModel: ZoneAxisViewModel by viewModels()
     private var sheetBackCallback: SheetBackPressedCallback? = null
     private var detailBackCallback: DetailBackPressedCallback? = null
     private var selectionBackCallback: SelectionBackPressedCallback? = null
@@ -210,6 +218,70 @@ class MainFragment :
         collectImmediately(listModel.selected, selectionBackCallback::invalidateEnabled)
         collectImmediately(playbackModel.song, ::updateSong)
         collectImmediately(playbackModel.openPanel.flow, ::handlePanel)
+
+        // --- ZONE AXIS (opt-in) ---
+        setUpZoneAxis(binding)
+        collectImmediately(playbackModel.song) { song -> zoneModel.onSongChanged(song) }
+    }
+
+    private fun setUpZoneAxis(binding: FragmentMainBinding) {
+        val language = binding.queueZoneLanguage
+        val type = binding.queueZoneType
+        if (!zoneModel.enabled) {
+            language.isVisible = false
+            type.isVisible = false
+            return
+        }
+        language.isVisible = true
+        type.isVisible = true
+
+        language.setOnClickListener {
+            showZonePopup(it, ZoneAxis.LANGUAGE, zoneModel.languageValues.value) { valueId ->
+                zoneModel.assignLanguage(valueId)
+            }
+        }
+        type.setOnClickListener {
+            showZonePopup(it, ZoneAxis.TYPE, zoneModel.typeValues.value) { valueId ->
+                zoneModel.assignType(valueId)
+            }
+        }
+
+        val all = getString(R.string.lbl_zone_all)
+        collectImmediately(zoneModel.languageValues, zoneModel.currentTag) { values, tag ->
+            val label = values.firstOrNull { it.id == tag?.languageValueId }?.label ?: all
+            language.text = getString(R.string.lbl_zone_value_arrow, label)
+        }
+        collectImmediately(zoneModel.typeValues, zoneModel.currentTag) { values, tag ->
+            val label = values.firstOrNull { it.id == tag?.typeValueId }?.label ?: all
+            type.text = getString(R.string.lbl_zone_value_arrow, label)
+        }
+    }
+
+    /**
+     * Show a popup listing [values] (plus "All" to clear) for [axis], anchored to
+     * [anchor]. The axis name appears only as a disabled header while the popup
+     * is open — the toolbar text itself only ever shows the current value.
+     */
+    private fun showZonePopup(
+        anchor: View,
+        axis: String,
+        values: List<ZoneAxisValue>,
+        onSelect: (Long?) -> Unit
+    ) {
+        val popup = PopupMenu(requireContext(), anchor)
+        popup.menu.add(Menu.NONE, HEADER_ITEM_ID, 0, axis).isEnabled = false
+        popup.menu.add(Menu.NONE, ALL_ITEM_ID, 1, getString(R.string.lbl_zone_all))
+        values.forEachIndexed { index, value ->
+            popup.menu.add(Menu.NONE, index, index + 2, value.label)
+        }
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                ALL_ITEM_ID -> onSelect(null)
+                else -> onSelect(values.getOrNull(item.itemId)?.id)
+            }
+            true
+        }
+        popup.show()
     }
 
     override fun onStart() {
@@ -767,5 +839,10 @@ class MainFragment :
                 "hide",
                 FloatingActionButton.OnVisibilityChangedListener::class,
                 Boolean::class)
+
+        // Menu item ids for the zone popup, kept clear of the 0-based value
+        // indices used for the actual axis values.
+        const val HEADER_ITEM_ID = -2
+        const val ALL_ITEM_ID = -1
     }
 }

@@ -126,6 +126,54 @@
                     app:layout_constraintEnd_toEndOf="@+id/queue_handle"
                     app:layout_constraintStart_toStartOf="parent" />
 
+                <!--
+                  Zone Axis: Language / Type selectors flanking the Queue title,
+                  same row, same text style. Hidden (GONE) by default; shown only
+                  when the Zone Axis plugin is enabled. Each shows just the
+                  current value ("All" when unset) — the axis name itself only
+                  appears as the popup menu's header while open, so it stays out
+                  of the way otherwise.
+                -->
+                <TextView
+                    android:id="@+id/queue_zone_language"
+                    android:contentDescription="@string/desc_zone_language"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/spacing_medium"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="@dimen/spacing_small"
+                    android:paddingVertical="@dimen/spacing_small"
+                    android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:visibility="gone"
+                    app:layout_constraintBottom_toBottomOf="@+id/queue_handle"
+                    app:layout_constraintStart_toStartOf="parent"
+                    tools:text="All ▾"
+                    tools:visibility="visible" />
+
+                <TextView
+                    android:id="@+id/queue_zone_type"
+                    android:contentDescription="@string/desc_zone_type"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="@dimen/spacing_medium"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="@dimen/spacing_small"
+                    android:paddingVertical="@dimen/spacing_small"
+                    android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:visibility="gone"
+                    app:layout_constraintBottom_toBottomOf="@+id/queue_handle"
+                    app:layout_constraintEnd_toEndOf="parent"
+                    tools:text="All ▾"
+                    tools:visibility="visible" />
+
             </androidx.constraintlayout.widget.ConstraintLayout>
 
             <androidx.fragment.app.FragmentContainerView

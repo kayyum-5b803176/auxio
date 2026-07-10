@@ -123,9 +123,8 @@
     <string name="lbl_shuffle">Shuffle</string>
 
     <string name="lbl_queue">Queue</string>
-    <string name="lbl_zone_language">Language</string>
-    <string name="lbl_zone_type">Type</string>
-    <string name="lbl_zone_unset">—</string>
+    <string name="lbl_zone_all">All</string>
+    <string name="lbl_zone_value_arrow">%1$s ▾</string>
     <string name="desc_zone_language">Assign a language to this song</string>
     <string name="desc_zone_type">Assign a type to this song</string>
     <string name="lbl_play_next">Play next</string>
