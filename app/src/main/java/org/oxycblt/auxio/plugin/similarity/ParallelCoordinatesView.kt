@@ -26,14 +26,20 @@ import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import androidx.core.graphics.ColorUtils
 import kotlin.math.abs
 
 /**
  * Renders songs as a parallel-coordinates plot across all 24 vector dimensions —
- * the real high-dimensional data, no reduction. Each song is a polyline; the x
- * position of each vertex is its axis, the y is that axis's value. Supports
- * pinch-zoom, pan, per-line highlight (current song, search match, selection),
- * and tap-to-select for the distance readout.
+ * the real high-dimensional data, no reduction. Each song is a polyline with a
+ * dot at every axis; the x position of each vertex is its axis, the y is that
+ * axis's value, auto-scaled per axis from the data actually being shown (the
+ * stored vectors are unit-normalized, so a fixed -1..1 range would squash every
+ * line into an unreadable clump).
+ *
+ * Every song gets a stable color (by [ZoneVisualizerViewModel.Plot.colorIndex])
+ * shared with its legend row. Tapping a line (or its legend row, via
+ * [setFocused]) highlights that song and dims every other line — a filter.
  */
 class ParallelCoordinatesView
 @JvmOverloads
@@ -43,8 +49,11 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyle: Int = 0) :
     private var plots: List<ZoneVisualizerViewModel.Plot> = emptyList()
     private var currentKey: String? = null
     private var dimensions: Int = 24
-    private var searchKey: String? = null
-    private var selectedKeys: Set<String> = emptySet()
+    private var focusedKey: String? = null
+
+    // Per-axis observed min/max across the current plots, for auto-scaling.
+    private var axisMin: FloatArray = FloatArray(0)
+    private var axisMax: FloatArray = FloatArray(0)
 
     /** Called when the user taps near a line; passes that song's key. */
     var onLineTapped: ((String) -> Unit)? = null
@@ -54,28 +63,10 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyle: Int = 0) :
     private var panX = 0f
     private var panY = 0f
 
-    // Colors resolved from theme at init; safe defaults here.
     private var colorAxis = Color.parseColor("#40808080")
-    private var colorUntagged = Color.parseColor("#33888888")
-    private var colorTagged = Color.parseColor("#886750A4")
-    private var colorCurrent = Color.parseColor("#FF6750A4")
-    private var colorSearch = Color.parseColor("#FFB3261E")
-    private var colorSelected = Color.parseColor("#FF1D9E75")
 
-    fun setThemeColors(
-        axis: Int,
-        untagged: Int,
-        tagged: Int,
-        current: Int,
-        search: Int,
-        selected: Int
-    ) {
+    fun setThemeColors(axis: Int) {
         colorAxis = axis
-        colorUntagged = untagged
-        colorTagged = tagged
-        colorCurrent = current
-        colorSearch = search
-        colorSelected = selected
         invalidate()
     }
 
@@ -87,25 +78,22 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyle: Int = 0) :
     private val linePaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = 2f
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
         }
+    private val dotPaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
 
     fun submit(model: ZoneVisualizerViewModel.Model) {
         plots = model.plots
         currentKey = model.currentKey
         dimensions = model.dimensions.coerceAtLeast(1)
+        computeAxisRanges()
         invalidate()
     }
 
-    fun setSearch(key: String?) {
-        searchKey = key
-        invalidate()
-    }
-
-    fun setSelection(keys: Set<String>) {
-        selectedKeys = keys
+    fun setFocused(key: String?) {
+        focusedKey = key
         invalidate()
     }
 
@@ -114,6 +102,33 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyle: Int = 0) :
         panX = 0f
         panY = 0f
         invalidate()
+    }
+
+    /** Per-axis min/max across all plotted vectors, so lines actually spread out. */
+    private fun computeAxisRanges() {
+        val d = dimensions
+        val min = FloatArray(d) { Float.MAX_VALUE }
+        val max = FloatArray(d) { -Float.MAX_VALUE }
+        for (plot in plots) {
+            val n = minOf(plot.vector.size, d)
+            for (i in 0 until n) {
+                val v = plot.vector[i]
+                if (v < min[i]) min[i] = v
+                if (v > max[i]) max[i] = v
+            }
+        }
+        // Guard against a degenerate (flat) axis with no observed spread.
+        for (i in 0 until d) {
+            if (min[i] > max[i]) {
+                min[i] = -0.3f
+                max[i] = 0.3f
+            } else if (max[i] - min[i] < 1e-4f) {
+                min[i] -= 0.05f
+                max[i] += 0.05f
+            }
+        }
+        axisMin = min
+        axisMax = max
     }
 
     private val scaleDetector =
@@ -189,10 +204,11 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyle: Int = 0) :
         return (MARGIN_X + i * step) * scaleFactor + panX
     }
 
-    private fun yForValue(v: Float, h: Float): Float {
-        // Vectors are normalized (roughly -1..1); map to [top, bottom].
+    private fun yForValue(v: Float, i: Int, h: Float): Float {
         val usable = h - 2 * MARGIN_Y
-        val norm = ((v + 1f) / 2f).coerceIn(0f, 1f)
+        val lo = axisMin.getOrElse(i) { -0.3f }
+        val hi = axisMax.getOrElse(i) { 0.3f }
+        val norm = ((v - lo) / (hi - lo)).coerceIn(0f, 1f)
         return (MARGIN_Y + (1f - norm) * usable) * scaleFactor + panY
     }
 
@@ -207,9 +223,9 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyle: Int = 0) :
         val n = minOf(vec.size, dimensions)
         for (i in 0 until n - 1) {
             val x1 = xForAxis(i, w)
-            val y1 = yForValue(vec[i], h)
+            val y1 = yForValue(vec[i], i, h)
             val x2 = xForAxis(i + 1, w)
-            val y2 = yForValue(vec[i + 1], h)
+            val y2 = yForValue(vec[i + 1], i + 1, h)
             best = minOf(best, pointToSegment(px, py, x1, y1, x2, y2))
         }
         return best
@@ -242,33 +258,36 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyle: Int = 0) :
         axisPaint.color = colorAxis
         for (i in 0 until dimensions) {
             val x = xForAxis(i, w)
-            canvas.drawLine(x, yForValue(1f, h), x, yForValue(-1f, h), axisPaint)
+            canvas.drawLine(
+                x, yForValue(axisMax[i], i, h), x, yForValue(axisMin[i], i, h), axisPaint)
         }
 
-        // Draw order: untagged first (faint), tagged, then highlighted on top.
-        val highlighted = ArrayList<ZoneVisualizerViewModel.Plot>()
+        val focused = focusedKey
+        // Draw order: everyone else first (dimmed if something is focused),
+        // then the focused/current lines on top so they're never occluded.
+        val onTop = ArrayList<ZoneVisualizerViewModel.Plot>()
         for (plot in plots) {
+            val isFocused = plot.key == focused
             val isCurrent = plot.key == currentKey
-            val isSearch = plot.key == searchKey
-            val isSelected = plot.key in selectedKeys
-            if (isCurrent || isSearch || isSelected) {
-                highlighted.add(plot)
+            if (isFocused || isCurrent) {
+                onTop.add(plot)
                 continue
             }
-            linePaint.color = if (plot.tagged) colorTagged else colorUntagged
-            linePaint.strokeWidth = 2f
-            drawPlot(canvas, plot, w, h)
+            val base = paletteColor(plot.colorIndex)
+            val alpha = if (focused != null) DIM_ALPHA else NORMAL_ALPHA
+            drawPlot(canvas, plot, w, h, ColorUtils.setAlphaComponent(base, alpha), 2f, dotR = 3f)
         }
-        // Highlighted lines drawn last (on top), thicker.
-        for (plot in highlighted) {
-            linePaint.color =
-                when {
-                    plot.key == currentKey -> colorCurrent
-                    plot.key == searchKey -> colorSearch
-                    else -> colorSelected
-                }
-            linePaint.strokeWidth = 4f
-            drawPlot(canvas, plot, w, h)
+        for (plot in onTop) {
+            val base = paletteColor(plot.colorIndex)
+            val isCurrent = plot.key == currentKey
+            val isFocused = plot.key == focused
+            // A line that's "current" but something ELSE is focused still dims,
+            // so the current song doesn't defeat the filter.
+            val dimmed = focused != null && !isFocused && !isCurrent
+            val alpha = if (dimmed) DIM_ALPHA else NORMAL_ALPHA
+            val strokeWidth = if (isFocused || isCurrent) 4f else 2f
+            val dotR = if (isFocused || isCurrent) 5f else 3f
+            drawPlot(canvas, plot, w, h, ColorUtils.setAlphaComponent(base, alpha), strokeWidth, dotR)
         }
     }
 
@@ -276,26 +295,63 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyle: Int = 0) :
         canvas: Canvas,
         plot: ZoneVisualizerViewModel.Plot,
         w: Float,
-        h: Float
+        h: Float,
+        color: Int,
+        strokeWidth: Float,
+        dotR: Float
     ) {
         val vec = plot.vector
         val n = minOf(vec.size, dimensions)
-        if (n < 2) return
+        if (n < 1) return
+        linePaint.color = color
+        linePaint.strokeWidth = strokeWidth
+        dotPaint.color = color
+
         var prevX = xForAxis(0, w)
-        var prevY = yForValue(vec[0], h)
+        var prevY = yForValue(vec[0], 0, h)
+        canvas.drawCircle(prevX, prevY, dotR, dotPaint)
         for (i in 1 until n) {
             val x = xForAxis(i, w)
-            val y = yForValue(vec[i], h)
+            val y = yForValue(vec[i], i, h)
             canvas.drawLine(prevX, prevY, x, y, linePaint)
+            canvas.drawCircle(x, y, dotR, dotPaint)
             prevX = x
             prevY = y
         }
     }
 
-    private companion object {
-        const val MARGIN_X = 48f
-        const val MARGIN_Y = 64f
-        const val TAP_SLOP = 20f
-        const val TAP_HIT_DISTANCE = 40f
+    companion object {
+        /**
+         * A fixed palette of visually distinct colors, cycled by index. Shared
+         * with the legend adapter so a line and its legend row always match.
+         */
+        fun paletteColor(index: Int): Int =
+            PALETTE[((index % PALETTE.size) + PALETTE.size) % PALETTE.size]
+
+        private val PALETTE =
+            intArrayOf(
+                Color.parseColor("#E24B4A"),
+                Color.parseColor("#378ADD"),
+                Color.parseColor("#1D9E75"),
+                Color.parseColor("#EF9F27"),
+                Color.parseColor("#7F77DD"),
+                Color.parseColor("#D4537E"),
+                Color.parseColor("#5DCAA5"),
+                Color.parseColor("#D85A30"),
+                Color.parseColor("#85B7EB"),
+                Color.parseColor("#97C459"),
+                Color.parseColor("#F0997B"),
+                Color.parseColor("#AFA9EC"),
+                Color.parseColor("#FAC775"),
+                Color.parseColor("#ED93B1"),
+                Color.parseColor("#993C1D"),
+                Color.parseColor("#0C447C"))
+
+        private const val MARGIN_X = 48f
+        private const val MARGIN_Y = 64f
+        private const val TAP_SLOP = 20f
+        private const val TAP_HIT_DISTANCE = 48f
+        private const val DIM_ALPHA = 40
+        private const val NORMAL_ALPHA = 220
     }
 }

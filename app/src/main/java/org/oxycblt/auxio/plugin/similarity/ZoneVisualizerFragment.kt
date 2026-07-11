@@ -35,7 +35,8 @@ import org.oxycblt.auxio.util.getAttrColorCompat
 
 /**
  * The Zone Axis Visualizer: a parallel-coordinates plot of every song's real
- * 24-dimensional Smart Chain vector. Reached from the overview overflow menu.
+ * 24-dimensional Smart Chain vector, with a legend that maps each line's color
+ * to a song. Reached from the overview overflow menu.
  */
 @AndroidEntryPoint
 class ZoneVisualizerFragment : ViewBindingFragment<FragmentZoneVisualizerBinding>() {
@@ -60,27 +61,20 @@ class ZoneVisualizerFragment : ViewBindingFragment<FragmentZoneVisualizerBinding
 
         val ctx = requireContext()
         binding.zoneVizCanvas.setThemeColors(
-            axis = ctx.getAttrColorCompat(com.google.android.material.R.attr.colorOutlineVariant)
-                .defaultColor,
-            untagged =
-                androidx.core.graphics.ColorUtils.setAlphaComponent(
-                    ctx.getAttrColorCompat(com.google.android.material.R.attr.colorOnSurfaceVariant)
-                        .defaultColor,
-                    0x55),
-            tagged =
-                androidx.core.graphics.ColorUtils.setAlphaComponent(
-                    ctx.getAttrColorCompat(com.google.android.material.R.attr.colorTertiary)
-                        .defaultColor,
-                    0xAA),
-            current = ctx.getAttrColorCompat(androidx.appcompat.R.attr.colorPrimary).defaultColor,
-            search = ctx.getAttrColorCompat(androidx.appcompat.R.attr.colorError)
-                .defaultColor,
-            selected = ctx.getAttrColorCompat(com.google.android.material.R.attr.colorTertiary)
-                .defaultColor)
+            axis =
+                ctx.getAttrColorCompat(com.google.android.material.R.attr.colorOutlineVariant)
+                    .defaultColor)
 
-        binding.zoneVizCanvas.onLineTapped = { key -> vizModel.toggleSelection(key) }
+        // Tapping a line focuses/filters on that song — same effect as tapping
+        // its legend row below.
+        binding.zoneVizCanvas.onLineTapped = { key -> vizModel.setFocused(key) }
+        binding.zoneVizReset.setOnClickListener {
+            binding.zoneVizCanvas.resetView()
+            vizModel.clearFocus()
+        }
 
-        binding.zoneVizReset.setOnClickListener { binding.zoneVizCanvas.resetView() }
+        val legendAdapter = ZoneVisualizerSongAdapter { key -> vizModel.setFocused(key) }
+        binding.zoneVizLegend.adapter = legendAdapter
 
         // Scope chips.
         binding.zoneVizScopeGroup.setOnCheckedStateChangeListener { _, checkedIds ->
@@ -95,32 +89,35 @@ class ZoneVisualizerFragment : ViewBindingFragment<FragmentZoneVisualizerBinding
             vizModel.setScope(scope)
         }
 
-        // Search: highlight the first song whose name contains the query.
+        // Search: focus the first song whose name contains the query — reuses
+        // the same focus/filter mechanism as tapping a line or legend row.
         binding.zoneVizSearch.doAfterTextChanged { text ->
             val query = text?.toString()?.trim().orEmpty()
-            if (query.isEmpty()) {
-                binding.zoneVizCanvas.setSearch(null)
-                return@doAfterTextChanged
-            }
+            if (query.isEmpty()) return@doAfterTextChanged
             val match =
                 vizModel.model.value.plots.firstOrNull {
                     it.song.name.resolve(ctx).contains(query, ignoreCase = true)
                 }
-            binding.zoneVizCanvas.setSearch(match?.key)
+            if (match != null) vizModel.setFocused(match.key)
         }
 
         collectImmediately(vizModel.model) { model ->
             binding.zoneVizCanvas.submit(model)
+            legendAdapter.submitList(model.plots)
+            legendAdapter.setCurrentKey(model.currentKey)
             binding.zoneVizEmpty.isVisible = model.plots.isEmpty()
+            binding.zoneVizLegendTitle.text =
+                resources.getQuantityString(
+                        R.plurals.fmt_song_count, model.plots.size, model.plots.size) +
+                    " · " + getString(R.string.lbl_zone_viz_legend_hint)
         }
-        collectImmediately(vizModel.selection) { selection ->
-            binding.zoneVizCanvas.setSelection(selection.toSet())
+        collectImmediately(vizModel.focusedKey) { key ->
+            binding.zoneVizCanvas.setFocused(key)
+            legendAdapter.setFocused(key)
         }
-        collectImmediately(vizModel.distance) { distance ->
-            if (distance == null) {
-                binding.zoneVizDistance.isVisible = false
-            } else {
-                binding.zoneVizDistance.isVisible = true
+        collectImmediately(vizModel.distanceToCurrent) { distance ->
+            binding.zoneVizDistance.isVisible = distance != null
+            if (distance != null) {
                 binding.zoneVizDistance.text =
                     getString(R.string.lbl_zone_viz_distance, "%.3f".format(distance))
             }

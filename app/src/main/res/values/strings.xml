@@ -133,8 +133,10 @@
     <string name="lbl_zone_viz_scope_all">All songs</string>
     <string name="lbl_zone_viz_search_hint">Search a song</string>
     <string name="lbl_zone_viz_empty">No vector data to show yet. Play some music with Smart Chain enabled.</string>
-    <string name="lbl_zone_viz_distance">Distance: %1$s</string>
-    <string name="desc_zone_viz_reset">Reset zoom</string>
+    <string name="lbl_zone_viz_distance">Distance to current: %1$s</string>
+    <string name="lbl_zone_viz_legend_hint">tap a line or a song below</string>
+    <string name="lbl_zone_viz_now_playing">Now playing</string>
+    <string name="desc_zone_viz_reset">Reset zoom and clear focus</string>
     <string name="lbl_zone_assign_change_title">Change tag?</string>
     <string name="lbl_zone_assign_change_confirm">Change %1$s from \"%2$s\" to \"%3$s\" for this song?</string>
     <string name="lbl_zone_assign_clear_confirm">Clear the %1$s tag \"%2$s\" from this song?</string>

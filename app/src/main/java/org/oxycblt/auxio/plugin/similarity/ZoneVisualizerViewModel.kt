@@ -45,12 +45,13 @@ constructor(
     private val playbackManager: PlaybackStateManager
 ) : ViewModel() {
 
-    /** One plottable line: a song, its 24-vector, tag state, and role. */
+    /** One plottable line: a song, its 24-vector, tag state, stable color, and role. */
     data class Plot(
         val song: Song,
         val key: String,
         val vector: FloatArray,
-        val tagged: Boolean
+        val tagged: Boolean,
+        val colorIndex: Int
     )
 
     data class Model(
@@ -71,12 +72,17 @@ constructor(
     private val _scope = MutableStateFlow(Scope.QUEUE)
     val scope: StateFlow<Scope> = _scope
 
-    /** Selected songs for the distance readout (0, 1, or 2). */
-    private val _selection = MutableStateFlow<List<String>>(emptyList())
-    val selection: StateFlow<List<String>> = _selection
+    /**
+     * The single song currently focused (tapped on the graph OR in the legend).
+     * Null = show every line at normal weight. Non-null = that line is
+     * highlighted and every other line is dimmed — the "filter" behavior.
+     */
+    private val _focusedKey = MutableStateFlow<String?>(null)
+    val focusedKey: StateFlow<String?> = _focusedKey
 
-    private val _distance = MutableStateFlow<Float?>(null)
-    val distance: StateFlow<Float?> = _distance
+    /** Distance from the focused song to the currently playing one, if both exist. */
+    private val _distanceToCurrent = MutableStateFlow<Float?>(null)
+    val distanceToCurrent: StateFlow<Float?> = _distanceToCurrent
 
     init {
         load(Scope.QUEUE)
@@ -134,7 +140,7 @@ constructor(
                 songs.mapNotNull { s ->
                     val k = keyBySong.getValue(s)
                     val v = embByKey[k] ?: return@mapNotNull null
-                    Plot(s, k, v, k in taggedKeys)
+                    Plot(s, k, v, k in taggedKeys, 0)
                 }
 
             // NEAREST: keep the current song + its 20 closest by cosine.
@@ -148,41 +154,41 @@ constructor(
                 }
             }
 
+            // Assign a stable color index by final position, so the graph line
+            // and its legend row always share the same color.
+            plots = plots.mapIndexed { index, p -> p.copy(colorIndex = index) }
+
             _model.value = Model(plots, currentKey, DIMENSIONS)
+            // Dropped songs (scope change) invalidate any stale focus.
+            if (_focusedKey.value != null && plots.none { it.key == _focusedKey.value }) {
+                _focusedKey.value = null
+            }
             recomputeDistance()
         }
     }
 
-    /** Toggle a song into/out of the distance-comparison selection (max 2). */
-    fun toggleSelection(key: String) {
-        val cur = _selection.value.toMutableList()
-        when {
-            key in cur -> cur.remove(key)
-            cur.size < 2 -> cur.add(key)
-            else -> {
-                cur.removeAt(0)
-                cur.add(key)
-            }
-        }
-        _selection.value = cur
+    /** Tap on a line or a legend row: toggle it as the focused/filtered song. */
+    fun setFocused(key: String) {
+        _focusedKey.value = if (_focusedKey.value == key) null else key
         recomputeDistance()
     }
 
-    fun clearSelection() {
-        _selection.value = emptyList()
-        _distance.value = null
+    fun clearFocus() {
+        _focusedKey.value = null
+        _distanceToCurrent.value = null
     }
 
     private fun recomputeDistance() {
-        val sel = _selection.value
-        if (sel.size < 2) {
-            _distance.value = null
+        val focused = _focusedKey.value
+        val currentKey = _model.value.currentKey
+        if (focused == null || currentKey == null || focused == currentKey) {
+            _distanceToCurrent.value = null
             return
         }
         val plots = _model.value.plots
-        val a = plots.firstOrNull { it.key == sel[0] }?.vector
-        val b = plots.firstOrNull { it.key == sel[1] }?.vector
-        _distance.value = if (a != null && b != null) 1f - cosine(a, b) else null
+        val a = plots.firstOrNull { it.key == focused }?.vector
+        val b = plots.firstOrNull { it.key == currentKey }?.vector
+        _distanceToCurrent.value = if (a != null && b != null) 1f - cosine(a, b) else null
     }
 
     private fun cosine(a: FloatArray, b: FloatArray): Float {

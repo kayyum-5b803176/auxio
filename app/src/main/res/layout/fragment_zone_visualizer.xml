@@ -84,7 +84,7 @@
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1">
+            android:layout_weight="3">
 
             <org.oxycblt.auxio.plugin.similarity.ParallelCoordinatesView
                 android:id="@+id/zone_viz_canvas"
@@ -114,7 +114,7 @@
                 android:paddingVertical="@dimen/spacing_small"
                 android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
                 android:visibility="gone"
-                tools:text="Distance: 0.42"
+                tools:text="Distance to current: 0.42"
                 tools:visibility="visible" />
 
             <com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -128,6 +128,29 @@
                 app:fabSize="mini" />
 
         </FrameLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="?attr/colorOutlineVariant" />
+
+        <TextView
+            android:id="@+id/zone_viz_legend_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="@dimen/spacing_medium"
+            android:paddingVertical="@dimen/spacing_small"
+            android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
+            tools:text="18 songs · tap a line or a song below" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/zone_viz_legend"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="2"
+            android:clipToPadding="false"
+            app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
+            tools:listitem="@layout/item_zone_viz_song" />
 
     </LinearLayout>
 
