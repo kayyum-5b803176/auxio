@@ -20,6 +20,11 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/action_zone_visualizer"
+        android:title="@string/lbl_zone_visualizer"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_about"
         android:title="@string/lbl_about"
         app:showAsAction="never" />

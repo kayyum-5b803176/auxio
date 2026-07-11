@@ -75,6 +75,10 @@ interface EmbeddingDao {
     @Query("SELECT * FROM SongEmbedding WHERE key IN (:keys)")
     suspend fun getAll(keys: List<String>): List<SongEmbedding>
 
+    /** Every stored embedding — used by the visualizer's "all songs" scope. */
+    @Query("SELECT * FROM SongEmbedding")
+    suspend fun all(): List<SongEmbedding>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun put(embedding: SongEmbedding)
 
     @Query("DELETE FROM SongEmbedding") suspend fun nuke()

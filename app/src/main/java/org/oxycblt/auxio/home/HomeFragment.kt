@@ -223,6 +223,11 @@ class HomeFragment :
                 homeModel.showAbout()
                 true
             }
+            R.id.action_zone_visualizer -> {
+                L.d("Navigating to zone axis visualizer")
+                findNavController().navigateSafe(HomeFragmentDirections.zoneVisualizer())
+                true
+            }
 
             // Handle sort menu
             R.id.action_sort -> {

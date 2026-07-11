@@ -127,6 +127,14 @@
     <string name="lbl_zone_value_arrow">%1$s ▾</string>
     <string name="lbl_zone_frequency">Frequency</string>
     <string name="lbl_zone_filter_clear">Clear all filters</string>
+    <string name="lbl_zone_visualizer">Zone axis visualizer</string>
+    <string name="lbl_zone_viz_scope_queue">Queue</string>
+    <string name="lbl_zone_viz_scope_nearest">Nearest 20</string>
+    <string name="lbl_zone_viz_scope_all">All songs</string>
+    <string name="lbl_zone_viz_search_hint">Search a song</string>
+    <string name="lbl_zone_viz_empty">No vector data to show yet. Play some music with Smart Chain enabled.</string>
+    <string name="lbl_zone_viz_distance">Distance: %1$s</string>
+    <string name="desc_zone_viz_reset">Reset zoom</string>
     <string name="lbl_zone_assign_change_title">Change tag?</string>
     <string name="lbl_zone_assign_change_confirm">Change %1$s from \"%2$s\" to \"%3$s\" for this song?</string>
     <string name="lbl_zone_assign_clear_confirm">Clear the %1$s tag \"%2$s\" from this song?</string>

@@ -13,6 +13,9 @@
             android:id="@+id/search"
             app:destination="@id/search_fragment" />
         <action
+            android:id="@+id/zone_visualizer"
+            app:destination="@id/zone_visualizer_fragment" />
+        <action
             android:id="@+id/sort_songs"
             app:destination="@+id/song_sort_dialog" />
         <action
@@ -202,6 +205,12 @@
             android:id="@+id/play_from_genre"
             app:destination="@id/play_from_genre_dialog" />
     </fragment>
+
+    <fragment
+        android:id="@+id/zone_visualizer_fragment"
+        android:name="org.oxycblt.auxio.plugin.similarity.ZoneVisualizerFragment"
+        android:label="zone_visualizer_fragment"
+        tools:layout="@layout/fragment_zone_visualizer" />
 
     <fragment
         android:id="@+id/album_detail_fragment"
