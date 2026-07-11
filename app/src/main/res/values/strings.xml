@@ -127,6 +127,9 @@
     <string name="lbl_zone_value_arrow">%1$s ▾</string>
     <string name="lbl_zone_frequency">Frequency</string>
     <string name="lbl_zone_filter_clear">Clear all filters</string>
+    <string name="lbl_zone_assign_change_title">Change tag?</string>
+    <string name="lbl_zone_assign_change_confirm">Change %1$s from \"%2$s\" to \"%3$s\" for this song?</string>
+    <string name="lbl_zone_assign_clear_confirm">Clear the %1$s tag \"%2$s\" from this song?</string>
     <string name="desc_zone_language">Assign a language to this song</string>
     <string name="desc_zone_type">Assign a type to this song</string>
     <string name="lbl_play_next">Play next</string>

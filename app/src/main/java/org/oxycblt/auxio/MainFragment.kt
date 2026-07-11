@@ -36,6 +36,7 @@ import androidx.navigation.findNavController
 import androidx.navigation.fragment.findNavController
 import com.google.android.material.R as MR
 import com.google.android.material.bottomsheet.BackportBottomSheetBehavior
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.shape.MaterialShapeDrawable
 import com.google.android.material.shape.ShapeAppearanceModel
@@ -238,12 +239,24 @@ class MainFragment :
 
         language.setOnClickListener {
             showZonePopup(it, ZoneAxis.LANGUAGE, zoneModel.languageValues.value) { valueId ->
-                zoneModel.assignLanguage(valueId)
+                confirmThenAssign(
+                    axis = ZoneAxis.LANGUAGE,
+                    currentValueId = zoneModel.currentTag.value?.languageValueId,
+                    newValueId = valueId,
+                    values = zoneModel.languageValues.value) {
+                        zoneModel.assignLanguage(valueId)
+                    }
             }
         }
         type.setOnClickListener {
             showZonePopup(it, ZoneAxis.TYPE, zoneModel.typeValues.value) { valueId ->
-                zoneModel.assignType(valueId)
+                confirmThenAssign(
+                    axis = ZoneAxis.TYPE,
+                    currentValueId = zoneModel.currentTag.value?.typeValueId,
+                    newValueId = valueId,
+                    values = zoneModel.typeValues.value) {
+                        zoneModel.assignType(valueId)
+                    }
             }
         }
 
@@ -280,6 +293,43 @@ class MainFragment :
                 if (active) android.graphics.Typeface.DEFAULT_BOLD
                 else android.graphics.Typeface.DEFAULT
         }
+    }
+
+    /**
+     * Assignment safety rule: a first-time tag (blank -> value) assigns instantly;
+     * changing OR clearing an existing tag asks for confirmation first, so an
+     * accidental tap can't silently overwrite a deliberate tag.
+     */
+    private fun confirmThenAssign(
+        axis: String,
+        currentValueId: Long?,
+        newValueId: Long?,
+        values: List<ZoneAxisValue>,
+        doAssign: () -> Unit
+    ) {
+        // No-op: picking the value it already has.
+        if (currentValueId == newValueId) return
+        // Blank -> value: instant, nothing to lose.
+        if (currentValueId == null) {
+            doAssign()
+            return
+        }
+        val all = getString(R.string.lbl_zone_all)
+        val fromLabel = values.firstOrNull { it.id == currentValueId }?.label ?: all
+        val message =
+            if (newValueId == null) {
+                // Value -> All (clear).
+                getString(R.string.lbl_zone_assign_clear_confirm, axis, fromLabel)
+            } else {
+                val toLabel = values.firstOrNull { it.id == newValueId }?.label ?: all
+                getString(R.string.lbl_zone_assign_change_confirm, axis, fromLabel, toLabel)
+            }
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.lbl_zone_assign_change_title)
+            .setMessage(message)
+            .setPositiveButton(android.R.string.ok) { _, _ -> doAssign() }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     /**
