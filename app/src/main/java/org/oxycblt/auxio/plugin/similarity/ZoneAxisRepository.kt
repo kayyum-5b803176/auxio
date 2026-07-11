@@ -41,6 +41,9 @@ interface ZoneAxisRepository {
 
     suspend fun renameValue(id: Long, newLabel: String)
 
+    /** Set a value's axis position (-1f..+1f). */
+    suspend fun setPosition(id: Long, position: Float)
+
     /** Delete a value and un-assign it from all songs. */
     suspend fun deleteValue(id: Long)
 
@@ -111,6 +114,10 @@ constructor(
         if (clean.isEmpty()) return
         val current = dao.valueById(id) ?: return
         dao.updateValue(current.copy(label = clean))
+    }
+
+    override suspend fun setPosition(id: Long, position: Float) {
+        dao.updatePosition(id, position.coerceIn(-1f, 1f))
     }
 
     override suspend fun deleteValue(id: Long) {

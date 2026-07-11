@@ -65,7 +65,21 @@
         android:id="@+id/zone_axis_fragment"
         android:name="org.oxycblt.auxio.plugin.similarity.ZoneAxisFragment"
         android:label="zone_axis_fragment"
-        tools:layout="@layout/fragment_zone_axis" />
+        tools:layout="@layout/fragment_zone_axis">
+        <action
+            android:id="@+id/edit_zone_position"
+            app:destination="@id/zone_value_position_fragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/zone_value_position_fragment"
+        android:name="org.oxycblt.auxio.plugin.similarity.ZoneValuePositionFragment"
+        android:label="zone_value_position_fragment"
+        tools:layout="@layout/fragment_zone_value_position">
+        <argument
+            android:name="valueId"
+            app:argType="long" />
+    </fragment>
 
     <fragment
         android:id="@+id/duplicates_fragment"

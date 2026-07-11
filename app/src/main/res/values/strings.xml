@@ -127,6 +127,12 @@
     <string name="lbl_zone_value_arrow">%1$s ▾</string>
     <string name="lbl_zone_frequency">Frequency</string>
     <string name="lbl_zone_filter_clear">Clear all filters</string>
+    <string name="lbl_zone_rename">Rename</string>
+    <string name="lbl_zone_pos_header">Position on this axis</string>
+    <string name="lbl_zone_pos_hint">Move toward −1 or +1 to set how opposite this value is from others on the same axis. Values close together are treated as similar; far apart as opposite.</string>
+    <string name="lbl_zone_pos_others">Other values on this axis</string>
+    <string name="lbl_zone_pos_gap">gap %1$s</string>
+    <string name="fmt_zone_pos_title">%1$s · %2$s</string>
     <string name="lbl_zone_visualizer">Zone axis visualizer</string>
     <string name="lbl_zone_viz_scope_queue">Queue</string>
     <string name="lbl_zone_viz_scope_nearest">Nearest 20</string>

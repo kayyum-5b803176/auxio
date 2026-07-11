@@ -33,7 +33,7 @@ import org.oxycblt.auxio.databinding.ItemZoneValueBinding
  */
 class ZoneAxisAdapter(
     private val onAdd: (axis: String) -> Unit,
-    private val onRename: (value: ZoneAxisValue) -> Unit,
+    private val onEditPosition: (value: ZoneAxisValue) -> Unit,
     private val onDelete: (value: ZoneAxisValue) -> Unit
 ) : ListAdapter<ZoneAxisAdapter.Row, RecyclerView.ViewHolder>(DIFFER) {
 
@@ -78,7 +78,14 @@ class ZoneAxisAdapter(
         RecyclerView.ViewHolder(binding.root) {
         fun bind(value: ZoneAxisValue) {
             binding.zoneValueLabel.text = value.label
-            binding.root.setOnClickListener { onRename(value) }
+            // Show the current axis position as a hint (e.g. "+0.30" / "0").
+            binding.zoneValueLabel.text =
+                if (value.position != 0f) {
+                    "${value.label}   ${"%+.2f".format(value.position)}"
+                } else {
+                    value.label
+                }
+            binding.root.setOnClickListener { onEditPosition(value) }
             binding.zoneValueDelete.setOnClickListener { onDelete(value) }
         }
     }

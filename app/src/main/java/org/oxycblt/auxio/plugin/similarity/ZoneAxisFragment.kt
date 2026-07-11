@@ -33,6 +33,7 @@ import org.oxycblt.auxio.R
 import org.oxycblt.auxio.databinding.FragmentZoneAxisBinding
 import org.oxycblt.auxio.ui.ViewBindingFragment
 import org.oxycblt.auxio.util.collectImmediately
+import org.oxycblt.auxio.util.navigateSafe
 
 /**
  * The Zone Axis management screen: CRUD over the user-defined Language and Type
@@ -59,7 +60,11 @@ class ZoneAxisFragment : ViewBindingFragment<FragmentZoneAxisBinding>() {
         val adapter =
             ZoneAxisAdapter(
                 onAdd = { axis -> showAddDialog(axis) },
-                onRename = { value -> showRenameDialog(value) },
+                onEditPosition = { value ->
+                    findNavController()
+                        .navigateSafe(
+                            ZoneAxisFragmentDirections.editZonePosition(value.id))
+                },
                 onDelete = { value -> showDeleteDialog(value) })
         binding.zoneAxisRecycler.adapter = adapter
 

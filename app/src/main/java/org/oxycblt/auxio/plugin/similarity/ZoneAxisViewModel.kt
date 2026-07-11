@@ -110,6 +110,10 @@ constructor(
         viewModelScope.launch { zoneAxisRepository.renameValue(id, newLabel) }
     }
 
+    fun setPosition(id: Long, position: Float) {
+        viewModelScope.launch { zoneAxisRepository.setPosition(id, position) }
+    }
+
     /** Delete a value (un-assigns it from all songs). */
     fun deleteValue(id: Long) {
         viewModelScope.launch { zoneAxisRepository.deleteValue(id) }
