@@ -20,6 +20,8 @@ package org.oxycblt.auxio.plugin.similarity
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -27,6 +29,23 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
+
+/**
+ * v5 -> v6: adds the SongLineage table (Zone Axis inheritance). Purely additive;
+ * existing embedding/quality/log data is preserved.
+ */
+val MIGRATION_5_6 =
+    object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `SongLineage` (" +
+                    "`songKey` TEXT NOT NULL, " +
+                    "`ancestorKey` TEXT NOT NULL, " +
+                    "`edgeStrength` REAL NOT NULL, " +
+                    "`updatedMs` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`songKey`))")
+        }
+    }
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -76,6 +95,7 @@ class PluginRoomModule {
             // change to ChainDatabase must ship an explicit Migration(from, to)
             // via .addMigrations(...) — never a blanket destructive fallback for
             // upgrades, and never another filename change (that orphans data).
+            .addMigrations(MIGRATION_5_6)
             .fallbackToDestructiveMigrationOnDowngrade()
             .build()
 
@@ -84,6 +104,8 @@ class PluginRoomModule {
     @Provides fun chainLogDao(database: ChainDatabase) = database.chainLogDao()
 
     @Provides fun qualityDao(database: ChainDatabase) = database.qualityDao()
+
+    @Provides fun lineageDao(database: ChainDatabase) = database.lineageDao()
 
     @Singleton
     @Provides

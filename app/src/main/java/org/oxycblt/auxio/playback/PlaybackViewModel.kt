@@ -610,6 +610,18 @@ constructor(
     }
 
     /**
+     * Re-apply the current shuffle order. Used after a Zone Axis filter change so
+     * the new scope takes effect immediately. No-op when not shuffled (the chain
+     * order only applies to shuffled playback).
+     */
+    fun reapplyChainOrder() {
+        if (playbackManager.isShuffled) {
+            L.d("Re-applying chain order for filter change")
+            playbackManager.shuffled(true)
+        }
+    }
+
+    /**
      * Toggle [repeatMode] (ex. from [RepeatMode.NONE] to [RepeatMode.TRACK])
      *
      * @see RepeatMode.increment

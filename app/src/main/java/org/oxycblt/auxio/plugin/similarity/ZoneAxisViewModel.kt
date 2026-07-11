@@ -70,6 +70,48 @@ constructor(
 
     private var currentSong: Song? = null
 
+    // ---- filter (hard filter, secondary feature) ------------------------
+
+    /** Whether any filter axis is currently active — drives the Queue tint/bold. */
+    private val _filterActive = MutableStateFlow(computeFilterActive())
+    val filterActive: StateFlow<Boolean> = _filterActive
+
+    val filterLanguageId: Long
+        get() = pluginSettings.zoneFilterLanguageId
+
+    val filterTypeId: Long
+        get() = pluginSettings.zoneFilterTypeId
+
+    val filterFrequencyOrdinal: Int
+        get() = pluginSettings.zoneFilterFrequencyOrdinal
+
+    private fun computeFilterActive(): Boolean =
+        pluginSettings.zoneFilterLanguageId >= 0 ||
+            pluginSettings.zoneFilterTypeId >= 0 ||
+            pluginSettings.zoneFilterFrequencyOrdinal >= 0
+
+    fun setFilterLanguage(valueId: Long?) {
+        pluginSettings.zoneFilterLanguageId = valueId ?: -1L
+        _filterActive.value = computeFilterActive()
+    }
+
+    fun setFilterType(valueId: Long?) {
+        pluginSettings.zoneFilterTypeId = valueId ?: -1L
+        _filterActive.value = computeFilterActive()
+    }
+
+    fun setFilterFrequency(ordinal: Int?) {
+        pluginSettings.zoneFilterFrequencyOrdinal = ordinal ?: -1
+        _filterActive.value = computeFilterActive()
+    }
+
+    fun clearFilter() {
+        pluginSettings.zoneFilterLanguageId = -1L
+        pluginSettings.zoneFilterTypeId = -1L
+        pluginSettings.zoneFilterFrequencyOrdinal = -1
+        _filterActive.value = false
+    }
+
     /** Called by the fragment whenever the now-playing song changes. */
     fun onSongChanged(song: Song?) {
         currentSong = song

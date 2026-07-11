@@ -47,8 +47,9 @@ import kotlinx.coroutines.flow.Flow
  * model is owned by the music, not the file.
  */
 @Database(
-    entities = [SongEmbedding::class, SongQuality::class, ChainLogEntry::class],
-    version = 5,
+    entities =
+        [SongEmbedding::class, SongQuality::class, ChainLogEntry::class, SongLineage::class],
+    version = 6,
     exportSchema = false)
 @TypeConverters(VectorConverter::class)
 abstract class ChainDatabase : RoomDatabase() {
@@ -57,6 +58,8 @@ abstract class ChainDatabase : RoomDatabase() {
     abstract fun qualityDao(): QualityDao
 
     abstract fun chainLogDao(): ChainLogDao
+
+    abstract fun lineageDao(): LineageDao
 }
 
 // ---------------------------------------------------------------------------
@@ -189,4 +192,49 @@ data class ChainLogEntry(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val timestampMs: Long,
     val message: String
+)
+
+// ---------------------------------------------------------------------------
+// Lineage (for Zone Axis inheritance)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-song chain lineage: the strongest/most-recent TAGGED-or-not ancestor a
+ * song was chained from. Used by Zone Axis to compute inherited tags — an
+ * unassigned song borrows its ancestor's effective tags.
+ *
+ * Only the single best ancestor is kept per song (strongest edge; most-recent
+ * breaks ties). Persisted so inheritance survives restarts.
+ */
+@Dao
+interface LineageDao {
+    @Query("SELECT * FROM SongLineage WHERE songKey = :songKey LIMIT 1")
+    suspend fun get(songKey: String): SongLineage?
+
+    @Query("SELECT * FROM SongLineage WHERE songKey IN (:keys)")
+    suspend fun getAll(keys: List<String>): List<SongLineage>
+
+    /** All rows whose ancestor is [ancestorKey] — for ripple recompute + walk-up. */
+    @Query("SELECT * FROM SongLineage WHERE ancestorKey = :ancestorKey")
+    suspend fun childrenOf(ancestorKey: String): List<SongLineage>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun put(lineage: SongLineage)
+
+    @Query("DELETE FROM SongLineage WHERE songKey = :songKey") suspend fun delete(songKey: String)
+
+    @Query("DELETE FROM SongLineage") suspend fun nuke()
+}
+
+/**
+ * @param songKey The song this lineage belongs to.
+ * @param ancestorKey The song it most-strongly/recently chained from.
+ * @param edgeStrength Similarity at the time the link formed (for "strongest").
+ * @param updatedMs When recorded (for "most-recent" tie-break).
+ */
+@Entity
+data class SongLineage(
+    @PrimaryKey val songKey: String,
+    val ancestorKey: String,
+    val edgeStrength: Float,
+    val updatedMs: Long
 )

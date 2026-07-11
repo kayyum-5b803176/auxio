@@ -60,6 +60,7 @@ import org.oxycblt.auxio.playback.OpenPanel
 import org.oxycblt.auxio.playback.PlaybackBottomSheetBehavior
 import org.oxycblt.auxio.playback.PlaybackViewModel
 import org.oxycblt.auxio.playback.queue.QueueBottomSheetBehavior
+import org.oxycblt.auxio.plugin.similarity.FrequencyTier
 import org.oxycblt.auxio.plugin.similarity.ZoneAxis
 import org.oxycblt.auxio.plugin.similarity.ZoneAxisValue
 import org.oxycblt.auxio.plugin.similarity.ZoneAxisViewModel
@@ -255,6 +256,119 @@ class MainFragment :
             val label = values.firstOrNull { it.id == tag?.typeValueId }?.label ?: all
             type.text = getString(R.string.lbl_zone_value_arrow, label)
         }
+
+        // Long-press "Queue" -> hard-filter popup. Tap on the dropdowns stays as
+        // assignment; only the center title opens the filter.
+        val title = binding.queueTitle
+        title.setOnLongClickListener {
+            showFilterPopup(it)
+            true
+        }
+        // Tint + bold the "Queue" text while any filter is active, so a filter
+        // that empties the queue is never invisible.
+        val activeColor =
+            requireContext()
+                .getAttrColorCompat(androidx.appcompat.R.attr.colorPrimary)
+                .defaultColor
+        val idleColor =
+            requireContext()
+                .getAttrColorCompat(com.google.android.material.R.attr.colorOnSurfaceVariant)
+                .defaultColor
+        collectImmediately(zoneModel.filterActive) { active ->
+            title.setTextColor(if (active) activeColor else idleColor)
+            title.typeface =
+                if (active) android.graphics.Typeface.DEFAULT_BOLD
+                else android.graphics.Typeface.DEFAULT
+        }
+    }
+
+    /**
+     * Two-level hard-filter popup on long-press of "Queue": first a list of axes
+     * (Language / Type / Frequency, each showing its current selection) plus
+     * "Clear all filters"; tapping an axis opens its options.
+     */
+    private fun showFilterPopup(anchor: View) {
+        val ctx = requireContext()
+        val all = getString(R.string.lbl_zone_all)
+        val langLabel =
+            zoneModel.languageValues.value.firstOrNull { it.id == zoneModel.filterLanguageId }
+                ?.label ?: all
+        val typeLabel =
+            zoneModel.typeValues.value.firstOrNull { it.id == zoneModel.filterTypeId }?.label ?: all
+        val freqLabel =
+            FrequencyTier.entries.getOrNull(zoneModel.filterFrequencyOrdinal)?.label ?: all
+
+        val popup = PopupMenu(ctx, anchor)
+        popup.menu.add(Menu.NONE, FILTER_LANGUAGE_ID, 0, "${ZoneAxis.LANGUAGE}: $langLabel")
+        popup.menu.add(Menu.NONE, FILTER_TYPE_ID, 1, "${ZoneAxis.TYPE}: $typeLabel")
+        popup.menu.add(Menu.NONE, FILTER_FREQ_ID, 2, "${getString(R.string.lbl_zone_frequency)}: $freqLabel")
+        popup.menu.add(Menu.NONE, FILTER_CLEAR_ID, 3, getString(R.string.lbl_zone_filter_clear))
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                FILTER_LANGUAGE_ID ->
+                    showFilterAxisPopup(anchor, ZoneAxis.LANGUAGE, zoneModel.languageValues.value) {
+                        zoneModel.setFilterLanguage(it)
+                        playbackModel.reapplyChainOrder()
+                    }
+                FILTER_TYPE_ID ->
+                    showFilterAxisPopup(anchor, ZoneAxis.TYPE, zoneModel.typeValues.value) {
+                        zoneModel.setFilterType(it)
+                        playbackModel.reapplyChainOrder()
+                    }
+                FILTER_FREQ_ID -> {
+                    showFrequencyFilterPopup(anchor)
+                }
+                FILTER_CLEAR_ID -> {
+                    zoneModel.clearFilter()
+                    playbackModel.reapplyChainOrder()
+                }
+            }
+            true
+        }
+        popup.show()
+    }
+
+    /** Second-level popup: options for one axis, plus "All" to clear that axis. */
+    private fun showFilterAxisPopup(
+        anchor: View,
+        axis: String,
+        values: List<ZoneAxisValue>,
+        onSelect: (Long?) -> Unit
+    ) {
+        val popup = PopupMenu(requireContext(), anchor)
+        popup.menu.add(Menu.NONE, HEADER_ITEM_ID, 0, axis).isEnabled = false
+        popup.menu.add(Menu.NONE, ALL_ITEM_ID, 1, getString(R.string.lbl_zone_all))
+        values.forEachIndexed { index, value ->
+            popup.menu.add(Menu.NONE, index, index + 2, value.label)
+        }
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                ALL_ITEM_ID -> onSelect(null)
+                else -> onSelect(values.getOrNull(item.itemId)?.id)
+            }
+            true
+        }
+        popup.show()
+    }
+
+    /** Second-level popup: frequency tiers ("at least this tier"), plus "All". */
+    private fun showFrequencyFilterPopup(anchor: View) {
+        val popup = PopupMenu(requireContext(), anchor)
+        popup.menu.add(Menu.NONE, HEADER_ITEM_ID, 0, getString(R.string.lbl_zone_frequency))
+            .isEnabled = false
+        popup.menu.add(Menu.NONE, ALL_ITEM_ID, 1, getString(R.string.lbl_zone_all))
+        FrequencyTier.entries.forEachIndexed { index, tier ->
+            popup.menu.add(Menu.NONE, index, index + 2, tier.label)
+        }
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                ALL_ITEM_ID -> zoneModel.setFilterFrequency(null)
+                else -> zoneModel.setFilterFrequency(item.itemId)
+            }
+            playbackModel.reapplyChainOrder()
+            true
+        }
+        popup.show()
     }
 
     /**
@@ -844,5 +958,12 @@ class MainFragment :
         // indices used for the actual axis values.
         const val HEADER_ITEM_ID = -2
         const val ALL_ITEM_ID = -1
+
+        // First-level filter popup item ids (also negative to stay clear of the
+        // 0-based value indices reused inside the second-level popups).
+        const val FILTER_LANGUAGE_ID = -10
+        const val FILTER_TYPE_ID = -11
+        const val FILTER_FREQ_ID = -12
+        const val FILTER_CLEAR_ID = -13
     }
 }

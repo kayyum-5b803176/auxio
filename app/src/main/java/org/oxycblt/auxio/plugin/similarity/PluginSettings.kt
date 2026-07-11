@@ -64,6 +64,17 @@ interface PluginSettings : Settings<PluginSettings.Listener> {
      */
     val zoneAxisEnabled: Boolean
 
+    /**
+     * Active Zone Axis hard-filter scope. -1 means "All" on that axis. Frequency
+     * is stored as a tier ordinal, -1 = All. Persisted so the scope survives
+     * restarts. Mutable — set from the filter popup on the Queue header.
+     */
+    var zoneFilterLanguageId: Long
+
+    var zoneFilterTypeId: Long
+
+    var zoneFilterFrequencyOrdinal: Int
+
     interface Listener {
         /** Called when [similarityDetectionEnabled] changes. */
         fun onSimilarityDetectionChanged() {}
@@ -76,6 +87,9 @@ interface PluginSettings : Settings<PluginSettings.Listener> {
 
         /** Called when [zoneAxisEnabled] changes. */
         fun onZoneAxisChanged() {}
+
+        /** Called when any zone filter field changes. */
+        fun onZoneFilterChanged() {}
     }
 }
 
@@ -115,6 +129,30 @@ class PluginSettingsImpl @Inject constructor(@ApplicationContext private val con
         get() =
             sharedPreferences.getBoolean(getString(R.string.set_key_zone_axis), false)
 
+    override var zoneFilterLanguageId: Long
+        get() = sharedPreferences.getLong(getString(R.string.set_key_zone_filter_language), -1L)
+        set(value) {
+            sharedPreferences.edit {
+                putLong(getString(R.string.set_key_zone_filter_language), value)
+            }
+        }
+
+    override var zoneFilterTypeId: Long
+        get() = sharedPreferences.getLong(getString(R.string.set_key_zone_filter_type), -1L)
+        set(value) {
+            sharedPreferences.edit {
+                putLong(getString(R.string.set_key_zone_filter_type), value)
+            }
+        }
+
+    override var zoneFilterFrequencyOrdinal: Int
+        get() = sharedPreferences.getInt(getString(R.string.set_key_zone_filter_frequency), -1)
+        set(value) {
+            sharedPreferences.edit {
+                putInt(getString(R.string.set_key_zone_filter_frequency), value)
+            }
+        }
+
     override fun onSettingChanged(key: String, listener: PluginSettings.Listener) {
         when (key) {
             getString(R.string.set_key_similarity_detection) ->
@@ -123,6 +161,10 @@ class PluginSettingsImpl @Inject constructor(@ApplicationContext private val con
                 listener.onPriorityFoldersChanged()
             getString(R.string.set_key_smart_chain) -> listener.onSmartChainChanged()
             getString(R.string.set_key_zone_axis) -> listener.onZoneAxisChanged()
+            getString(R.string.set_key_zone_filter_language),
+            getString(R.string.set_key_zone_filter_type),
+            getString(R.string.set_key_zone_filter_frequency) ->
+                listener.onZoneFilterChanged()
         }
     }
 }

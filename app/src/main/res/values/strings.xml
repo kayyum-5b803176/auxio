@@ -125,6 +125,8 @@
     <string name="lbl_queue">Queue</string>
     <string name="lbl_zone_all">All</string>
     <string name="lbl_zone_value_arrow">%1$s ▾</string>
+    <string name="lbl_zone_frequency">Frequency</string>
+    <string name="lbl_zone_filter_clear">Clear all filters</string>
     <string name="desc_zone_language">Assign a language to this song</string>
     <string name="desc_zone_type">Assign a type to this song</string>
     <string name="lbl_play_next">Play next</string>

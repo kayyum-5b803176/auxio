@@ -140,6 +140,7 @@
                         tools:visibility="visible" />
 
                     <TextView
+                        android:id="@+id/queue_title"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"

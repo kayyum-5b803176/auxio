@@ -202,4 +202,7 @@
     <string name="set_key_smart_chain_logs" translatable="false">auxio_smart_chain_logs</string>
     <string name="set_key_zone_axis" translatable="false">auxio_zone_axis</string>
     <string name="set_key_zone_axis_manage" translatable="false">auxio_zone_axis_manage</string>
+    <string name="set_key_zone_filter_language" translatable="false">auxio_zone_filter_language</string>
+    <string name="set_key_zone_filter_type" translatable="false">auxio_zone_filter_type</string>
+    <string name="set_key_zone_filter_frequency" translatable="false">auxio_zone_filter_frequency</string>
 </resources>

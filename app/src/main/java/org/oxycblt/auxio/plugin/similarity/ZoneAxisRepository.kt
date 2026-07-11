@@ -56,6 +56,34 @@ interface ZoneAxisRepository {
     /** Frequency tier for [song], derived live from behavioral quality data. */
     suspend fun frequencyOf(song: Song): FrequencyTier
 
+    /**
+     * The EXPLICIT axis values for a song key (no inheritance). Returns
+     * (languageValueId, typeValueId), either may be null.
+     */
+    suspend fun explicitTags(songKey: String): Pair<Long?, Long?>
+
+    /**
+     * Whether two song keys may be chained under Rule A using only EXPLICIT
+     * tags — used at learning time. Incompatible iff some axis where BOTH have
+     * an explicit value disagrees. Blank axes never conflict.
+     */
+    suspend fun explicitlyCompatible(aKey: String, bKey: String): Boolean
+
+    /**
+     * Effective tags (explicit + inherited via lineage walk-up) for a song key.
+     * Explicit wins; inherited fills only blank axes. Used at ordering time.
+     */
+    suspend fun effectiveTags(songKey: String): Pair<Long?, Long?>
+
+    /**
+     * Whether [candidateKey] may follow [currentKey] under Rule A using EFFECTIVE
+     * tags — used at ordering time.
+     */
+    suspend fun effectivelyCompatible(currentKey: String, candidateKey: String): Boolean
+
+    /** Record/update a song's chain lineage (strongest/most-recent ancestor). */
+    suspend fun recordLineage(songKey: String, ancestorKey: String, edgeStrength: Float)
+
     suspend fun clear()
 }
 
@@ -64,6 +92,7 @@ class ZoneAxisRepositoryImpl
 constructor(
     private val dao: ZoneAxisDao,
     private val qualityDao: QualityDao,
+    private val lineageDao: LineageDao,
     private val fingerprintRepository: FingerprintRepository
 ) : ZoneAxisRepository {
 
@@ -128,6 +157,10 @@ constructor(
 
     override suspend fun frequencyOf(song: Song): FrequencyTier {
         val key = keyOf(song)
+        return frequencyOfKey(key)
+    }
+
+    private suspend fun frequencyOfKey(key: String): FrequencyTier {
         val q = qualityDao.get(key) ?: return FrequencyTier.LOW_FREQUENT
         val net = q.positiveScore - q.negativeScore
         val plays = q.playCount
@@ -143,13 +176,85 @@ constructor(
         }
     }
 
+    override suspend fun explicitTags(songKey: String): Pair<Long?, Long?> {
+        val tag = dao.tagFor(songKey) ?: return null to null
+        return tag.languageValueId to tag.typeValueId
+    }
+
+    override suspend fun explicitlyCompatible(aKey: String, bKey: String): Boolean {
+        val (aLang, aType) = explicitTags(aKey)
+        val (bLang, bType) = explicitTags(bKey)
+        return axesAgree(aLang, bLang) && axesAgree(aType, bType)
+    }
+
+    override suspend fun effectiveTags(songKey: String): Pair<Long?, Long?> {
+        val (explicitLang, explicitType) = explicitTags(songKey)
+        // Both axes explicit -> no inheritance needed.
+        if (explicitLang != null && explicitType != null) return explicitLang to explicitType
+
+        // Walk lineage upward to fill blank axes, healing over deleted ancestors.
+        var lang = explicitLang
+        var type = explicitType
+        var cursorKey = songKey
+        val seen = HashSet<String>()
+        var hops = 0
+        while ((lang == null || type == null) && hops < MAX_LINEAGE_HOPS) {
+            if (!seen.add(cursorKey)) break // cycle guard
+            val lineage = lineageDao.get(cursorKey) ?: break
+            var ancestorKey = lineage.ancestorKey
+            // Walk-up over deleted ancestors: if the ancestor has no data of its
+            // own (no tag AND no embedding), treat it as gone and follow ITS
+            // lineage to the next surviving ancestor.
+            var guard = 0
+            while (guard < MAX_LINEAGE_HOPS && isMissing(ancestorKey)) {
+                val next = lineageDao.get(ancestorKey) ?: break
+                ancestorKey = next.ancestorKey
+                guard++
+            }
+            if (isMissing(ancestorKey)) break
+            val (ancLang, ancType) = explicitTags(ancestorKey)
+            if (lang == null) lang = ancLang
+            if (type == null) type = ancType
+            cursorKey = ancestorKey
+            hops++
+        }
+        return lang to type
+    }
+
+    override suspend fun effectivelyCompatible(currentKey: String, candidateKey: String): Boolean {
+        val (curLang, curType) = effectiveTags(currentKey)
+        val (candLang, candType) = effectiveTags(candidateKey)
+        return axesAgree(curLang, candLang) && axesAgree(curType, candType)
+    }
+
+    override suspend fun recordLineage(songKey: String, ancestorKey: String, edgeStrength: Float) {
+        if (songKey == ancestorKey) return
+        val now = System.currentTimeMillis()
+        val existing = lineageDao.get(songKey)
+        // Keep the STRONGEST ancestor; most-recent breaks ties (>=).
+        if (existing == null || edgeStrength >= existing.edgeStrength) {
+            lineageDao.put(SongLineage(songKey, ancestorKey, edgeStrength, now))
+        }
+    }
+
+    /** A key is "missing" if it has neither a tag nor an embedding row. */
+    private suspend fun isMissing(key: String): Boolean {
+        if (dao.tagFor(key) != null) return false
+        return qualityDao.get(key) == null && lineageDao.get(key) == null
+    }
+
+    /** Two axis values agree unless BOTH are set and differ (Rule A). */
+    private fun axesAgree(a: Long?, b: Long?): Boolean = a == null || b == null || a == b
+
     override suspend fun clear() {
         dao.nukeTags()
         dao.nukeValues()
+        lineageDao.nuke()
     }
 
     private companion object {
         const val HIGH_FREQUENT_NET = 3.0f
         const val HIGH_FREQUENT_PLAYS = 5
+        const val MAX_LINEAGE_HOPS = 32
     }
 }

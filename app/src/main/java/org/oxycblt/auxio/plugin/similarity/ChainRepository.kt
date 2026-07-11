@@ -58,14 +58,30 @@ interface ChainRepository {
 
     /**
      * Order [heap] by similarity for the player. Greedy nearest-neighbour walk
-     * from [startHeapIndex]: each step picks the unused song whose vector is
-     * closest to the current one (so the next song is as identical as possible),
-     * with quality as a tie-breaker. When [explore] is true (shuffle), sample
-     * among the top-K nearest instead of always taking the single closest.
+     * from [startHeapIndex], honoring Zone Axis compatibility (never chains a
+     * song whose EFFECTIVE tags conflict with the current one). When [filter]
+     * is non-null, only songs passing the filter (plus inherited-compatible
+     * ones) are eligible to play next; the rest are pushed to the tail.
      *
-     * @return a permutation of heap.indices starting at [startHeapIndex].
+     * @return a permutation of heap.indices starting at [startHeapIndex], or an
+     *   empty array to signal "filter matched nothing" (caller should stop).
      */
-    suspend fun chainOrdering(heap: List<Song>, startHeapIndex: Int, explore: Boolean): IntArray
+    suspend fun chainOrdering(
+        heap: List<Song>,
+        startHeapIndex: Int,
+        explore: Boolean,
+        filter: ZoneFilter? = null
+    ): IntArray
+
+    /** Active hard-filter scope. Null fields mean "All" on that axis. */
+    data class ZoneFilter(
+        val languageValueId: Long?,
+        val typeValueId: Long?,
+        val minFrequency: FrequencyTier?
+    ) {
+        val isActive: Boolean
+            get() = languageValueId != null || typeValueId != null || minFrequency != null
+    }
 
     /** Clear all learned data. */
     suspend fun clear()
@@ -78,6 +94,7 @@ constructor(
     private val qualityDao: QualityDao,
     private val fingerprintRepository: FingerprintRepository,
     private val musicRepository: org.oxycblt.auxio.music.MusicRepository,
+    private val zoneAxisRepository: ZoneAxisRepository,
     private val chainLog: ChainLog
 ) : ChainRepository {
 
@@ -153,6 +170,13 @@ constructor(
         if (fromKey == toKey) return
 
         val now = System.currentTimeMillis()
+
+        // Zone Axis (Option A): if the user has EXPLICITLY tagged both songs
+        // with conflicting axis values, never merge their vectors — "not
+        // learning is better than learning in a wrong direction". Unassigned
+        // songs still learn normally.
+        val explicitlyCompatible = zoneAxisRepository.explicitlyCompatible(fromKey, toKey)
+
         val a = agedTowardAnchor(embeddingFor(from, fromKey, now), from, fromKey, now)
         val b = agedTowardAnchor(embeddingFor(to, toKey, now), to, toKey, now)
 
@@ -162,7 +186,23 @@ constructor(
         if (pull < 0) pull *= SKIP_REPEL_MULTIPLIER
         if (pull > 0 && kind == "Select") pull *= SELECT_ATTRACT_MULTIPLIER
 
+        // Block only ATTRACTION across an explicit axis conflict. Repulsion
+        // (negative pull) is always allowed — pushing conflicting songs apart is
+        // never wrong.
+        if (pull > 0 && !explicitlyCompatible) {
+            chainLog.log(
+                "⊘ Axis block: ${nameOf(from)} → ${nameOf(to)} (different axis, not linked)")
+            return
+        }
+
         applyPull(a, b, from, to, fromKey, toKey, pull, now, BASE_LEARNING_RATE)
+
+        // Record lineage for inheritance: the follow (to) descends from (from),
+        // weighted by the resulting similarity so "strongest ancestor" wins.
+        if (pull > 0) {
+            val sim = cosine(embeddingDao.get(fromKey)!!.vector, embeddingDao.get(toKey)!!.vector)
+            zoneAxisRepository.recordLineage(toKey, fromKey, sim)
+        }
 
         val pct = (listenedFraction * 100).toInt()
         val sim = cosine(embeddingDao.get(fromKey)!!.vector, embeddingDao.get(toKey)!!.vector)
@@ -287,12 +327,12 @@ constructor(
     override suspend fun chainOrdering(
         heap: List<Song>,
         startHeapIndex: Int,
-        explore: Boolean
+        explore: Boolean,
+        filter: ChainRepository.ZoneFilter?
     ): IntArray {
         val n = heap.size
         if (n <= 1) return IntArray(n) { it }
         val start = startHeapIndex.coerceIn(0, n - 1)
-        val now = System.currentTimeMillis()
 
         // Resolve keys and gather vectors + quality once.
         val keys = arrayOfNulls<String>(n)
@@ -307,8 +347,10 @@ constructor(
         for (chunk in distinctKeys.chunked(BATCH)) {
             for (q in qualityDao.getAll(chunk)) qualByKey[q.key] = q.positiveScore - q.negativeScore
         }
-        // Vectors for songs with no stored embedding yet: seed on the fly (not
-        // persisted here — persisted lazily when they're actually played).
+        // Effective (explicit + inherited) tags per key, computed once.
+        val effTags = HashMap<String, Pair<Long?, Long?>>()
+        for (k in distinctKeys) effTags[k] = zoneAxisRepository.effectiveTags(k)
+
         val vectorOf = { i: Int ->
             val k = keys[i]
             when {
@@ -318,48 +360,103 @@ constructor(
             }
         }
         val qualOf = { i: Int -> keys[i]?.let { qualByKey[it] } ?: 0f }
+        val tagsOf = { i: Int -> keys[i]?.let { effTags[it] } ?: (null to null) }
+
+        // Rule A: two positions are compatible unless some axis where BOTH have
+        // an effective value disagrees.
+        val compatible = { i: Int, j: Int ->
+            val (li, ti) = tagsOf(i)
+            val (lj, tj) = tagsOf(j)
+            (li == null || lj == null || li == lj) && (ti == null || tj == null || ti == tj)
+        }
+
+        // Hard filter membership (Step: filter is secondary). A position passes
+        // if its effective tags match the selected axis values AND its frequency
+        // tier is at least the floor. Null filter fields = "All".
+        val passesFilter: suspend (Int) -> Boolean = pass@{ i ->
+            if (filter == null || !filter.isActive) return@pass true
+            val (lang, type) = tagsOf(i)
+            if (filter.languageValueId != null && lang != filter.languageValueId) return@pass false
+            if (filter.typeValueId != null && type != filter.typeValueId) return@pass false
+            if (filter.minFrequency != null) {
+                val k = keys[i] ?: return@pass false
+                if (frequencyTierOrdinalOf(k) < filter.minFrequency.ordinal) return@pass false
+            }
+            true
+        }
+
+        // Precompute filter eligibility.
+        val eligible = BooleanArray(n) { true }
+        if (filter != null && filter.isActive) {
+            var anyEligible = false
+            for (i in 0 until n) {
+                val ok = passesFilter(i)
+                eligible[i] = ok
+                if (ok) anyEligible = true
+            }
+            // Filter matched nothing -> signal caller to stop (empty result).
+            if (!anyEligible) return IntArray(0)
+        }
 
         val used = BooleanArray(n)
         val order = IntArray(n)
         order[0] = start
         used[start] = true
         var current = start
+        var filled = 1
 
         for (pos in 1 until n) {
             val cur = vectorOf(current)
+            // Candidates: unused, compatible with current, and (if filtering) eligible.
+            val scored = ArrayList<Pair<Int, Float>>(n)
+            for (i in 0 until n) {
+                if (used[i]) continue
+                if (!compatible(current, i)) continue
+                if (filter != null && filter.isActive && !eligible[i]) continue
+                val v = vectorOf(i)
+                val sim = if (v == null || cur == null) -1f else cosine(cur, v)
+                scored.add(i to (sim + QUALITY_TIEBREAK * qualOf(i)))
+            }
+            if (scored.isEmpty()) break // no compatible/eligible follow remains
+            scored.sortByDescending { it.second }
             val next =
-                if (cur == null) {
-                    firstUnused(used)
+                if (explore) {
+                    val k = minOf(EXPLORE_TOP_K, scored.size)
+                    scored[Random.nextInt(k)].first
                 } else {
-                    // Score every unused song by similarity (+ quality tiebreak).
-                    val scored = ArrayList<Pair<Int, Float>>(n)
-                    for (i in 0 until n) {
-                        if (used[i]) continue
-                        val v = vectorOf(i)
-                        val sim = if (v == null) -1f else cosine(cur, v)
-                        scored.add(i to (sim + QUALITY_TIEBREAK * qualOf(i)))
-                    }
-                    if (scored.isEmpty()) break
-                    scored.sortByDescending { it.second }
-                    if (explore) {
-                        // Shuffle: sample among the top-K nearest for bounded variety.
-                        val k = minOf(EXPLORE_TOP_K, scored.size)
-                        scored[Random.nextInt(k)].first
-                    } else {
-                        // Continuation: the single most-similar song.
-                        scored[0].first
-                    }
+                    scored[0].first
                 }
             order[pos] = next
             used[next] = true
             current = next
+            filled++
+        }
+
+        // Append any leftover positions (incompatible follows, or filtered-out
+        // songs) at the tail so the result stays a full permutation — required
+        // by BetterShuffleOrder. Filtered-out songs simply never play before the
+        // eligible ones are exhausted.
+        if (filled < n) {
+            for (i in 0 until n) if (!used[i]) {
+                order[filled++] = i
+                used[i] = true
+            }
         }
         return order
     }
 
-    private fun firstUnused(used: BooleanArray): Int {
-        for (i in used.indices) if (!used[i]) return i
-        return 0
+    private suspend fun frequencyTierOrdinalOf(key: String): Int {
+        val q = qualityDao.get(key) ?: return FrequencyTier.LOW_FREQUENT.ordinal
+        val net = q.positiveScore - q.negativeScore
+        val plays = q.playCount
+        val skips = q.skipCount
+        val skipRate = if (plays + skips > 0) skips.toFloat() / (plays + skips) else 0f
+        return when {
+            skipRate >= 0.8f && plays <= 1 -> FrequencyTier.NOT_LISTENABLE.ordinal
+            skipRate >= 0.5f -> FrequencyTier.SKIP_OFTEN.ordinal
+            net >= 3.0f && plays >= 5 -> FrequencyTier.HIGH_FREQUENT.ordinal
+            else -> FrequencyTier.LOW_FREQUENT.ordinal
+        }
     }
 
     override suspend fun clear() {
