@@ -42,6 +42,7 @@ import com.google.android.material.tabs.TabLayoutMediator
 import com.google.android.material.transition.MaterialSharedAxis
 import dagger.hilt.android.AndroidEntryPoint
 import java.lang.reflect.Field
+import javax.inject.Inject
 import kotlin.math.abs
 import org.oxycblt.auxio.R
 import org.oxycblt.auxio.databinding.FragmentHomeBinding
@@ -64,6 +65,7 @@ import org.oxycblt.auxio.music.PlaylistDecision
 import org.oxycblt.auxio.music.PlaylistMessage
 import org.oxycblt.auxio.playback.PlaybackDecision
 import org.oxycblt.auxio.playback.PlaybackViewModel
+import org.oxycblt.auxio.plugin.similarity.PluginSettings
 import org.oxycblt.auxio.plugin.similarity.ZoneAxisViewModel
 import org.oxycblt.auxio.util.collect
 import org.oxycblt.auxio.util.collectImmediately
@@ -91,6 +93,7 @@ class HomeFragment :
     private val homeModel: HomeViewModel by activityViewModels()
     private val detailModel: DetailViewModel by activityViewModels()
     private val zoneModel: ZoneAxisViewModel by viewModels()
+    @Inject lateinit var pluginSettings: PluginSettings
     private var storagePermissionLauncher: ActivityResultLauncher<String>? = null
     private var getContentLauncher: ActivityResultLauncher<String>? = null
     private var pendingImportTarget: Playlist? = null
@@ -140,7 +143,7 @@ class HomeFragment :
         // overflow menu whenever the plugin is off. Re-checked in onResume too,
         // since that's when the user returns here after flipping the toggle in
         // Settings.
-        updateZoneVisualizerVisibility(binding)
+        updatePluginMenuVisibility(binding)
 
         binding.homePager.apply {
             // Update HomeViewModel whenever the user swipes through the ViewPager.
@@ -203,12 +206,14 @@ class HomeFragment :
         // Catches the case where the user toggled the Zone Axis plugin in
         // Settings and came back here — onBindingCreated only runs once, but
         // onResume fires every time this screen becomes visible again.
-        updateZoneVisualizerVisibility(requireBinding())
+        updatePluginMenuVisibility(requireBinding())
     }
 
-    private fun updateZoneVisualizerVisibility(binding: FragmentHomeBinding) {
+    private fun updatePluginMenuVisibility(binding: FragmentHomeBinding) {
         binding.homeNormalToolbar.menu.findItem(R.id.action_zone_visualizer)?.isVisible =
             zoneModel.enabled
+        binding.homeNormalToolbar.menu.findItem(R.id.action_smart_chain_log)?.isVisible =
+            pluginSettings.smartChainEnabled
     }
 
     override fun onOffsetChanged(appBarLayout: AppBarLayout, verticalOffset: Int) {
@@ -247,6 +252,11 @@ class HomeFragment :
             R.id.action_zone_visualizer -> {
                 L.d("Navigating to zone axis visualizer")
                 findNavController().navigateSafe(HomeFragmentDirections.zoneVisualizer())
+                true
+            }
+            R.id.action_smart_chain_log -> {
+                L.d("Navigating to smart chain log")
+                findNavController().navigateSafe(HomeFragmentDirections.smartChainLog())
                 true
             }
 

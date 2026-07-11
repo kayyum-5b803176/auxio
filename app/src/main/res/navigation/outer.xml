@@ -52,9 +52,6 @@
             android:id="@+id/priority_folders_settings"
             app:destination="@id/priority_folders_dialog" />
         <action
-            android:id="@+id/chain_log_settings"
-            app:destination="@id/chain_log_fragment" />
-        <action
             android:id="@+id/zone_axis_settings"
             app:destination="@id/zone_axis_fragment" />
     </fragment>
@@ -69,12 +66,6 @@
         android:name="org.oxycblt.auxio.plugin.similarity.ZoneAxisFragment"
         android:label="zone_axis_fragment"
         tools:layout="@layout/fragment_zone_axis" />
-
-    <fragment
-        android:id="@+id/chain_log_fragment"
-        android:name="org.oxycblt.auxio.plugin.similarity.ChainLogFragment"
-        android:label="chain_log_fragment"
-        tools:layout="@layout/fragment_chain_log" />
 
     <fragment
         android:id="@+id/duplicates_fragment"

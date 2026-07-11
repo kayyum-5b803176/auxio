@@ -25,6 +25,11 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/action_smart_chain_log"
+        android:title="@string/set_smart_chain_logs"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_about"
         android:title="@string/lbl_about"
         app:showAsAction="never" />
