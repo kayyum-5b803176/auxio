@@ -57,6 +57,14 @@ class ZoneVisualizerFragment : ViewBindingFragment<FragmentZoneVisualizerBinding
     ) {
         super.onBindingCreated(binding, savedInstanceState)
 
+        // Defensive: this screen belongs to the Zone Axis plugin. The overflow
+        // menu entry is hidden while the plugin is off, but guard here too in
+        // case of a stale nav action (e.g. the plugin was disabled mid-navigation).
+        if (!vizModel.pluginEnabled) {
+            findNavController().navigateUp()
+            return
+        }
+
         binding.zoneVizToolbar.setNavigationOnClickListener { findNavController().navigateUp() }
 
         val ctx = requireContext()

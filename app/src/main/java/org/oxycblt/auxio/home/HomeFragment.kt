@@ -31,6 +31,7 @@ import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
 import androidx.fragment.app.activityViewModels
+import androidx.fragment.app.viewModels
 import androidx.lifecycle.LifecycleOwner
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.RecyclerView
@@ -63,6 +64,7 @@ import org.oxycblt.auxio.music.PlaylistDecision
 import org.oxycblt.auxio.music.PlaylistMessage
 import org.oxycblt.auxio.playback.PlaybackDecision
 import org.oxycblt.auxio.playback.PlaybackViewModel
+import org.oxycblt.auxio.plugin.similarity.ZoneAxisViewModel
 import org.oxycblt.auxio.util.collect
 import org.oxycblt.auxio.util.collectImmediately
 import org.oxycblt.auxio.util.lazyReflectedField
@@ -88,6 +90,7 @@ class HomeFragment :
     override val playbackModel: PlaybackViewModel by activityViewModels()
     private val homeModel: HomeViewModel by activityViewModels()
     private val detailModel: DetailViewModel by activityViewModels()
+    private val zoneModel: ZoneAxisViewModel by viewModels()
     private var storagePermissionLauncher: ActivityResultLauncher<String>? = null
     private var getContentLauncher: ActivityResultLauncher<String>? = null
     private var pendingImportTarget: Playlist? = null
@@ -133,6 +136,11 @@ class HomeFragment :
             setOnMenuItemClickListener(this@HomeFragment)
             MenuCompat.setGroupDividerEnabled(menu, true)
         }
+        // Zone axis visualizer is part of the Zone Axis plugin: hide it from the
+        // overflow menu whenever the plugin is off. Re-checked in onResume too,
+        // since that's when the user returns here after flipping the toggle in
+        // Settings.
+        updateZoneVisualizerVisibility(binding)
 
         binding.homePager.apply {
             // Update HomeViewModel whenever the user swipes through the ViewPager.
@@ -188,6 +196,19 @@ class HomeFragment :
         storagePermissionLauncher = null
         binding.homeAppbar.removeOnOffsetChangedListener(this)
         binding.homeNormalToolbar.setOnMenuItemClickListener(null)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Catches the case where the user toggled the Zone Axis plugin in
+        // Settings and came back here — onBindingCreated only runs once, but
+        // onResume fires every time this screen becomes visible again.
+        updateZoneVisualizerVisibility(requireBinding())
+    }
+
+    private fun updateZoneVisualizerVisibility(binding: FragmentHomeBinding) {
+        binding.homeNormalToolbar.menu.findItem(R.id.action_zone_visualizer)?.isVisible =
+            zoneModel.enabled
     }
 
     override fun onOffsetChanged(appBarLayout: AppBarLayout, verticalOffset: Int) {

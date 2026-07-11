@@ -42,8 +42,14 @@ constructor(
     private val zoneAxisDao: ZoneAxisDao,
     private val fingerprintRepository: FingerprintRepository,
     private val musicRepository: MusicRepository,
-    private val playbackManager: PlaybackStateManager
+    private val playbackManager: PlaybackStateManager,
+    private val pluginSettings: PluginSettings
 ) : ViewModel() {
+
+    /** This whole screen belongs to the Zone Axis plugin; checked defensively
+     * by the fragment in case of a stale nav action. */
+    val pluginEnabled: Boolean
+        get() = pluginSettings.zoneAxisEnabled
 
     /** One plottable line: a song, its 24-vector, tag state, stable color, and role. */
     data class Plot(
