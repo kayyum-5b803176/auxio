@@ -58,30 +58,13 @@ interface ChainRepository {
 
     /**
      * Order [heap] by similarity for the player. Greedy nearest-neighbour walk
-     * from [startHeapIndex], honoring Zone Axis compatibility (never chains a
-     * song whose EFFECTIVE tags conflict with the current one). When [filter]
-     * is non-null, only songs passing the filter (plus inherited-compatible
-     * ones) are eligible to play next; the rest are pushed to the tail.
+     * from [startHeapIndex]. Each candidate is scored by vector similarity minus
+     * the normalized zone-space distance (continuous, no hard block), so a
+     * zone-far song is demoted rather than excluded.
      *
-     * @return a permutation of heap.indices starting at [startHeapIndex], or an
-     *   empty array to signal "filter matched nothing" (caller should stop).
+     * @return a permutation of heap.indices starting at [startHeapIndex].
      */
-    suspend fun chainOrdering(
-        heap: List<Song>,
-        startHeapIndex: Int,
-        explore: Boolean,
-        filter: ZoneFilter? = null
-    ): IntArray
-
-    /** Active hard-filter scope. Null fields mean "All" on that axis. */
-    data class ZoneFilter(
-        val languageValueId: Long?,
-        val typeValueId: Long?,
-        val minFrequency: FrequencyTier?
-    ) {
-        val isActive: Boolean
-            get() = languageValueId != null || typeValueId != null || minFrequency != null
-    }
+    suspend fun chainOrdering(heap: List<Song>, startHeapIndex: Int, explore: Boolean): IntArray
 
     /** Clear all learned data. */
     suspend fun clear()
@@ -171,44 +154,35 @@ constructor(
 
         val now = System.currentTimeMillis()
 
-        // Zone Axis (Option A): if the user has EXPLICITLY tagged both songs
-        // with conflicting axis values, never merge their vectors — "not
-        // learning is better than learning in a wrong direction". Unassigned
-        // songs still learn normally.
-        val explicitlyCompatible = zoneAxisRepository.explicitlyCompatible(fromKey, toKey)
-
         val a = agedTowardAnchor(embeddingFor(from, fromKey, now), from, fromKey, now)
         val b = agedTowardAnchor(embeddingFor(to, toKey, now), to, toKey, now)
 
-        // Signed pull: positive (heard) attracts, negative (skipped) repels.
-        // Skips repel harder so rejected pairings separate quickly.
+        // Base signed pull from listening: positive (heard) attracts, negative
+        // (skipped) repels. Skips repel harder so rejected pairings separate.
         var pull = (listenedFraction - SKIP_THRESHOLD)
         if (pull < 0) pull *= SKIP_REPEL_MULTIPLIER
         if (pull > 0 && kind == "Select") pull *= SELECT_ATTRACT_MULTIPLIER
 
-        // Block only ATTRACTION across an explicit axis conflict. Repulsion
-        // (negative pull) is always allowed — pushing conflicting songs apart is
-        // never wrong.
-        if (pull > 0 && !explicitlyCompatible) {
-            chainLog.log(
-                "⊘ Axis block: ${nameOf(from)} → ${nameOf(to)} (different axis, not linked)")
-            return
-        }
+        // Zone-space blend (additive, penalty-only): subtract the normalized
+        // 0..1 zone-distance, scaled by ZONE_LEARN_WEIGHT (firm = ~1, roughly
+        // equal to a typical listening pull). This can flip a clean listen to
+        // net repulsion when two songs are tagged far apart, and actively drives
+        // opposite-tagged songs apart even without a skip — but it never ADDS
+        // attraction (blank axes sit at 0, so a bonus there would pull the whole
+        // untagged library together, re-creating cross-zone contamination).
+        val fromZone = zoneAxisRepository.zonePosition(fromKey)
+        val toZone = zoneAxisRepository.zonePosition(toKey)
+        val zd = zoneAxisRepository.normalizedDistance(fromZone, toZone)
+        pull -= ZONE_LEARN_WEIGHT * zd
 
         applyPull(a, b, from, to, fromKey, toKey, pull, now, BASE_LEARNING_RATE)
-
-        // Record lineage for inheritance: the follow (to) descends from (from),
-        // weighted by the resulting similarity so "strongest ancestor" wins.
-        if (pull > 0) {
-            val sim = cosine(embeddingDao.get(fromKey)!!.vector, embeddingDao.get(toKey)!!.vector)
-            zoneAxisRepository.recordLineage(toKey, fromKey, sim)
-        }
 
         val pct = (listenedFraction * 100).toInt()
         val sim = cosine(embeddingDao.get(fromKey)!!.vector, embeddingDao.get(toKey)!!.vector)
         val keyKind = if (fromKey.startsWith("uid:")) " [uid]" else ""
+        val zoneNote = if (zd > 0.01f) " zd=${"%.2f".format(zd)}" else ""
         chainLog.log(
-            "$kind: ${nameOf(from)} → ${nameOf(to)} (heard $pct%, sim now ${"%.2f".format(sim)})$keyKind")
+            "$kind: ${nameOf(from)} → ${nameOf(to)} (heard $pct%, sim now ${"%.2f".format(sim)}$zoneNote)$keyKind")
     }
 
     override suspend fun confirmPairing(a: Song, b: Song, similar: Boolean) {
@@ -327,8 +301,7 @@ constructor(
     override suspend fun chainOrdering(
         heap: List<Song>,
         startHeapIndex: Int,
-        explore: Boolean,
-        filter: ChainRepository.ZoneFilter?
+        explore: Boolean
     ): IntArray {
         val n = heap.size
         if (n <= 1) return IntArray(n) { it }
@@ -347,9 +320,8 @@ constructor(
         for (chunk in distinctKeys.chunked(BATCH)) {
             for (q in qualityDao.getAll(chunk)) qualByKey[q.key] = q.positiveScore - q.negativeScore
         }
-        // Effective (explicit + inherited) tags per key, computed once.
-        val effTags = HashMap<String, Pair<Long?, Long?>>()
-        for (k in distinctKeys) effTags[k] = zoneAxisRepository.effectiveTags(k)
+        // Zone-space coordinates per key, computed once (batched).
+        val zoneByKey = zoneAxisRepository.zonePositions(distinctKeys)
 
         val vectorOf = { i: Int ->
             val k = keys[i]
@@ -360,43 +332,7 @@ constructor(
             }
         }
         val qualOf = { i: Int -> keys[i]?.let { qualByKey[it] } ?: 0f }
-        val tagsOf = { i: Int -> keys[i]?.let { effTags[it] } ?: (null to null) }
-
-        // Rule A: two positions are compatible unless some axis where BOTH have
-        // an effective value disagrees.
-        val compatible = { i: Int, j: Int ->
-            val (li, ti) = tagsOf(i)
-            val (lj, tj) = tagsOf(j)
-            (li == null || lj == null || li == lj) && (ti == null || tj == null || ti == tj)
-        }
-
-        // Hard filter membership (Step: filter is secondary). A position passes
-        // if its effective tags match the selected axis values AND its frequency
-        // tier is at least the floor. Null filter fields = "All".
-        val passesFilter: suspend (Int) -> Boolean = pass@{ i ->
-            if (filter == null || !filter.isActive) return@pass true
-            val (lang, type) = tagsOf(i)
-            if (filter.languageValueId != null && lang != filter.languageValueId) return@pass false
-            if (filter.typeValueId != null && type != filter.typeValueId) return@pass false
-            if (filter.minFrequency != null) {
-                val k = keys[i] ?: return@pass false
-                if (frequencyTierOrdinalOf(k) < filter.minFrequency.ordinal) return@pass false
-            }
-            true
-        }
-
-        // Precompute filter eligibility.
-        val eligible = BooleanArray(n) { true }
-        if (filter != null && filter.isActive) {
-            var anyEligible = false
-            for (i in 0 until n) {
-                val ok = passesFilter(i)
-                eligible[i] = ok
-                if (ok) anyEligible = true
-            }
-            // Filter matched nothing -> signal caller to stop (empty result).
-            if (!anyEligible) return IntArray(0)
-        }
+        val zoneOf = { i: Int -> keys[i]?.let { zoneByKey[it] } ?: ZonePoint(0f, 0f, 0f) }
 
         val used = BooleanArray(n)
         val order = IntArray(n)
@@ -407,17 +343,22 @@ constructor(
 
         for (pos in 1 until n) {
             val cur = vectorOf(current)
-            // Candidates: unused, compatible with current, and (if filtering) eligible.
+            val curZone = zoneOf(current)
+            // Continuous score: vector similarity minus the normalized zone
+            // distance (weighted), plus a small quality tiebreak. No hard block —
+            // a zone-far song is demoted, not excluded, so learning never stalls.
+            // Similarity spans 2.0 (-1..1) while the zone penalty maxes at
+            // ZONE_ORDER_WEIGHT: tags can gate, but only accumulated listening
+            // (deeply negative similarity) can truly veto a pairing.
             val scored = ArrayList<Pair<Int, Float>>(n)
             for (i in 0 until n) {
                 if (used[i]) continue
-                if (!compatible(current, i)) continue
-                if (filter != null && filter.isActive && !eligible[i]) continue
                 val v = vectorOf(i)
                 val sim = if (v == null || cur == null) -1f else cosine(cur, v)
-                scored.add(i to (sim + QUALITY_TIEBREAK * qualOf(i)))
+                val zd = zoneAxisRepository.normalizedDistance(curZone, zoneOf(i))
+                scored.add(i to (sim - ZONE_ORDER_WEIGHT * zd + QUALITY_TIEBREAK * qualOf(i)))
             }
-            if (scored.isEmpty()) break // no compatible/eligible follow remains
+            if (scored.isEmpty()) break
             scored.sortByDescending { it.second }
             val next =
                 if (explore) {
@@ -432,10 +373,8 @@ constructor(
             filled++
         }
 
-        // Append any leftover positions (incompatible follows, or filtered-out
-        // songs) at the tail so the result stays a full permutation — required
-        // by BetterShuffleOrder. Filtered-out songs simply never play before the
-        // eligible ones are exhausted.
+        // Append any leftovers at the tail so the result stays a full
+        // permutation (required by BetterShuffleOrder).
         if (filled < n) {
             for (i in 0 until n) if (!used[i]) {
                 order[filled++] = i
@@ -443,20 +382,6 @@ constructor(
             }
         }
         return order
-    }
-
-    private suspend fun frequencyTierOrdinalOf(key: String): Int {
-        val q = qualityDao.get(key) ?: return FrequencyTier.LOW_FREQUENT.ordinal
-        val net = q.positiveScore - q.negativeScore
-        val plays = q.playCount
-        val skips = q.skipCount
-        val skipRate = if (plays + skips > 0) skips.toFloat() / (plays + skips) else 0f
-        return when {
-            skipRate >= 0.8f && plays <= 1 -> FrequencyTier.NOT_LISTENABLE.ordinal
-            skipRate >= 0.5f -> FrequencyTier.SKIP_OFTEN.ordinal
-            net >= 3.0f && plays >= 5 -> FrequencyTier.HIGH_FREQUENT.ordinal
-            else -> FrequencyTier.LOW_FREQUENT.ordinal
-        }
     }
 
     override suspend fun clear() {
@@ -499,6 +424,15 @@ constructor(
         // Quality.
         const val JUMP_BACK_BONUS = 1.0f
         const val QUALITY_TIEBREAK = 0.15f // similarity dominates; quality breaks ties
+
+        // Zone-space blend (Language x Type x Frequency 3D distance).
+        // Learning: "firm" ~= 1.0, roughly equal to a typical listening pull, so
+        //   a solidly-opposite tag pair can flip a clean listen to net repel.
+        // Ordering: penalty maxes at this weight while similarity spans 2.0, so
+        //   tags demote/gate but only accumulated listening can truly veto.
+        // Both are on-device tuning knobs; the structure won't change if they do.
+        const val ZONE_LEARN_WEIGHT = 1.0f
+        const val ZONE_ORDER_WEIGHT = 1.0f
 
         // Cold-start seeding weights.
         const val ARTIST_SEED_WEIGHT = 1.0f

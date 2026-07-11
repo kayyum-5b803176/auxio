@@ -47,6 +47,18 @@ val MIGRATION_5_6 =
         }
     }
 
+/**
+ * Zone DB v1 -> v2: adds the `position` column to ZoneAxisValue (continuous
+ * zone-space). Additive; defaults to 0 (neutral center) for all existing values.
+ */
+val MIGRATION_ZONE_1_2 =
+    object : Migration(1, 2) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "ALTER TABLE `ZoneAxisValue` ADD COLUMN `position` REAL NOT NULL DEFAULT 0")
+        }
+    }
+
 @Module
 @InstallIn(SingletonComponent::class)
 interface PluginModule {
@@ -115,6 +127,7 @@ class PluginRoomModule {
             // Same policy as ChainDatabase: user-authored tags must never be
             // silently wiped on upgrade. Future schema changes ship an explicit
             // Migration; only downgrades may reset.
+            .addMigrations(MIGRATION_ZONE_1_2)
             .fallbackToDestructiveMigrationOnDowngrade()
             .build()
 

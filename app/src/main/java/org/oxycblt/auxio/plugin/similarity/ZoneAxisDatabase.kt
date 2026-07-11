@@ -43,7 +43,7 @@ import kotlinx.coroutines.flow.Flow
  */
 @Database(
     entities = [ZoneAxisValue::class, SongZoneTag::class],
-    version = 1,
+    version = 2,
     exportSchema = false)
 abstract class ZoneAxisDatabase : RoomDatabase() {
     abstract fun zoneAxisDao(): ZoneAxisDao
@@ -72,6 +72,9 @@ interface ZoneAxisDao {
     suspend fun insertValue(value: ZoneAxisValue): Long
 
     @Update suspend fun updateValue(value: ZoneAxisValue)
+
+    @Query("UPDATE ZoneAxisValue SET position = :position WHERE id = :id")
+    suspend fun updatePosition(id: Long, position: Float)
 
     @Query("DELETE FROM ZoneAxisValue WHERE id = :id") suspend fun deleteValue(id: Long)
 
@@ -122,6 +125,12 @@ data class ZoneAxisValue(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val axis: String,
     val label: String,
+    /**
+     * Position of this value on its axis, -1f..+1f, default 0f (neutral center).
+     * Two values' positions define their distance on that axis; a song's
+     * (languagePos, typePos, frequencyPos) is its point in the 3D zone-space.
+     */
+    val position: Float = 0f,
     val createdAtMs: Long
 )
 

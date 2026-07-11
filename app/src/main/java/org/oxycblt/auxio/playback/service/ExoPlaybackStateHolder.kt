@@ -312,29 +312,9 @@ class ExoPlaybackStateHolder(
             return
         }
         saveScope.launch {
-            // Build the active hard-filter from persisted settings (Zone Axis).
-            val filter =
-                if (pluginSettings.zoneAxisEnabled) {
-                    val lang = pluginSettings.zoneFilterLanguageId.takeIf { it >= 0 }
-                    val type = pluginSettings.zoneFilterTypeId.takeIf { it >= 0 }
-                    val freqOrd = pluginSettings.zoneFilterFrequencyOrdinal.takeIf { it >= 0 }
-                    val freq =
-                        freqOrd?.let {
-                            org.oxycblt.auxio.plugin.similarity.FrequencyTier.entries.getOrNull(it)
-                        }
-                    if (lang != null || type != null || freq != null) {
-                        org.oxycblt.auxio.plugin.similarity.ChainRepository.ZoneFilter(
-                            lang, type, freq)
-                    } else {
-                        null
-                    }
-                } else {
-                    null
-                }
             val order =
                 try {
-                    chainRepository.chainOrdering(
-                        heap, startHeapIndex, explore = explore, filter = filter)
+                    chainRepository.chainOrdering(heap, startHeapIndex, explore = explore)
                 } catch (e: Exception) {
                     L.e("SmartChain: chain shuffle ordering failed, using stock: $e")
                     null
@@ -342,16 +322,10 @@ class ExoPlaybackStateHolder(
             withContext(Dispatchers.Main) {
                 // Re-check state hasn't changed underneath us.
                 if (player.shuffleModeEnabled && player.mediaItemCount == count) {
-                    when {
-                        // Filter matched nothing -> stop rather than play an
-                        // out-of-scope song (user's explicit choice).
-                        order != null && order.isEmpty() -> {
-                            player.pause()
-                            player.setShuffleOrder(BetterShuffleOrder(count, startHeapIndex))
-                        }
-                        order != null && order.size == count ->
-                            player.setShuffleOrder(BetterShuffleOrder(order))
-                        else -> player.setShuffleOrder(BetterShuffleOrder(count, startHeapIndex))
+                    if (order != null && order.size == count) {
+                        player.setShuffleOrder(BetterShuffleOrder(order))
+                    } else {
+                        player.setShuffleOrder(BetterShuffleOrder(count, startHeapIndex))
                     }
                     playbackManager.ack(this@ExoPlaybackStateHolder, StateAck.QueueReordered)
                 }

@@ -57,42 +57,34 @@ interface ZoneAxisRepository {
     suspend fun frequencyOf(song: Song): FrequencyTier
 
     /**
-     * The EXPLICIT axis values for a song key (no inheritance). Returns
-     * (languageValueId, typeValueId), either may be null.
+     * The 3D zone-space coordinate for a song key: (languagePos, typePos,
+     * frequencyPos). Language/Type come from the assigned values' slider
+     * positions (blank axis = 0, neutral center). Frequency is computed live,
+     * per-song, from listening behavior. Used by both learning and ordering.
      */
-    suspend fun explicitTags(songKey: String): Pair<Long?, Long?>
+    suspend fun zonePosition(songKey: String): ZonePoint
+
+    /** Batch form of [zonePosition] for the ordering pass. */
+    suspend fun zonePositions(songKeys: List<String>): Map<String, ZonePoint>
 
     /**
-     * Whether two song keys may be chained under Rule A using only EXPLICIT
-     * tags — used at learning time. Incompatible iff some axis where BOTH have
-     * an explicit value disagrees. Blank axes never conflict.
+     * Normalized 0..1 zone-distance between two coordinates: raw Euclidean
+     * distance divided by the cube diagonal (sqrt(12) ~= 3.46), so it lines up
+     * with the roughly -1..1 listening-pull scale for blending.
      */
-    suspend fun explicitlyCompatible(aKey: String, bKey: String): Boolean
-
-    /**
-     * Effective tags (explicit + inherited via lineage walk-up) for a song key.
-     * Explicit wins; inherited fills only blank axes. Used at ordering time.
-     */
-    suspend fun effectiveTags(songKey: String): Pair<Long?, Long?>
-
-    /**
-     * Whether [candidateKey] may follow [currentKey] under Rule A using EFFECTIVE
-     * tags — used at ordering time.
-     */
-    suspend fun effectivelyCompatible(currentKey: String, candidateKey: String): Boolean
-
-    /** Record/update a song's chain lineage (strongest/most-recent ancestor). */
-    suspend fun recordLineage(songKey: String, ancestorKey: String, edgeStrength: Float)
+    fun normalizedDistance(a: ZonePoint, b: ZonePoint): Float
 
     suspend fun clear()
 }
+
+/** A song's point in the 3D zone-space. Each component is -1f..+1f. */
+data class ZonePoint(val language: Float, val type: Float, val frequency: Float)
 
 class ZoneAxisRepositoryImpl
 @Inject
 constructor(
     private val dao: ZoneAxisDao,
     private val qualityDao: QualityDao,
-    private val lineageDao: LineageDao,
     private val fingerprintRepository: FingerprintRepository
 ) : ZoneAxisRepository {
 
@@ -176,85 +168,73 @@ constructor(
         }
     }
 
-    override suspend fun explicitTags(songKey: String): Pair<Long?, Long?> {
-        val tag = dao.tagFor(songKey) ?: return null to null
-        return tag.languageValueId to tag.typeValueId
+    /**
+     * Frequency coordinate on Z: continuous, per-song, from listening behavior.
+     * r = play ratio in -1..1; shrunk toward 0 by sample size so a song with
+     * little history stays near neutral center (never-played -> exactly 0, the
+     * same neutral as a blank tag — the system doesn't exile the unknown, only
+     * the known-disliked). Redemption is automatic: clean plays pull it back up.
+     */
+    private suspend fun frequencyPosition(key: String): Float {
+        val q = qualityDao.get(key) ?: return 0f
+        val plays = q.playCount
+        val skips = q.skipCount
+        val n = plays + skips
+        if (n <= 0) return 0f
+        val r = plays.toFloat() / n // 0..1
+        val shrink = n.toFloat() / (n + FREQ_SHRINK_K)
+        return ((2f * r) - 1f) * shrink // -1..1
     }
 
-    override suspend fun explicitlyCompatible(aKey: String, bKey: String): Boolean {
-        val (aLang, aType) = explicitTags(aKey)
-        val (bLang, bType) = explicitTags(bKey)
-        return axesAgree(aLang, bLang) && axesAgree(aType, bType)
+    override suspend fun zonePosition(songKey: String): ZonePoint {
+        val tag = dao.tagFor(songKey)
+        val lang = tag?.languageValueId?.let { dao.valueById(it)?.position } ?: 0f
+        val type = tag?.typeValueId?.let { dao.valueById(it)?.position } ?: 0f
+        val freq = frequencyPosition(songKey)
+        return ZonePoint(lang, type, freq)
     }
 
-    override suspend fun effectiveTags(songKey: String): Pair<Long?, Long?> {
-        val (explicitLang, explicitType) = explicitTags(songKey)
-        // Both axes explicit -> no inheritance needed.
-        if (explicitLang != null && explicitType != null) return explicitLang to explicitType
-
-        // Walk lineage upward to fill blank axes, healing over deleted ancestors.
-        var lang = explicitLang
-        var type = explicitType
-        var cursorKey = songKey
-        val seen = HashSet<String>()
-        var hops = 0
-        while ((lang == null || type == null) && hops < MAX_LINEAGE_HOPS) {
-            if (!seen.add(cursorKey)) break // cycle guard
-            val lineage = lineageDao.get(cursorKey) ?: break
-            var ancestorKey = lineage.ancestorKey
-            // Walk-up over deleted ancestors: if the ancestor has no data of its
-            // own (no tag AND no embedding), treat it as gone and follow ITS
-            // lineage to the next surviving ancestor.
-            var guard = 0
-            while (guard < MAX_LINEAGE_HOPS && isMissing(ancestorKey)) {
-                val next = lineageDao.get(ancestorKey) ?: break
-                ancestorKey = next.ancestorKey
-                guard++
-            }
-            if (isMissing(ancestorKey)) break
-            val (ancLang, ancType) = explicitTags(ancestorKey)
-            if (lang == null) lang = ancLang
-            if (type == null) type = ancType
-            cursorKey = ancestorKey
-            hops++
+    override suspend fun zonePositions(songKeys: List<String>): Map<String, ZonePoint> {
+        if (songKeys.isEmpty()) return emptyMap()
+        // Batch the tag lookups; resolve value positions through a small cache
+        // so repeated value ids don't re-query.
+        val tags = HashMap<String, SongZoneTag>()
+        for (chunk in songKeys.chunked(BATCH)) {
+            for (t in dao.tagsFor(chunk)) tags[t.songKey] = t
         }
-        return lang to type
-    }
-
-    override suspend fun effectivelyCompatible(currentKey: String, candidateKey: String): Boolean {
-        val (curLang, curType) = effectiveTags(currentKey)
-        val (candLang, candType) = effectiveTags(candidateKey)
-        return axesAgree(curLang, candLang) && axesAgree(curType, candType)
-    }
-
-    override suspend fun recordLineage(songKey: String, ancestorKey: String, edgeStrength: Float) {
-        if (songKey == ancestorKey) return
-        val now = System.currentTimeMillis()
-        val existing = lineageDao.get(songKey)
-        // Keep the STRONGEST ancestor; most-recent breaks ties (>=).
-        if (existing == null || edgeStrength >= existing.edgeStrength) {
-            lineageDao.put(SongLineage(songKey, ancestorKey, edgeStrength, now))
+        val posCache = HashMap<Long, Float>()
+        suspend fun posOf(id: Long?): Float {
+            if (id == null) return 0f
+            return posCache.getOrPut(id) { dao.valueById(id)?.position ?: 0f }
         }
+        val out = HashMap<String, ZonePoint>(songKeys.size)
+        for (key in songKeys) {
+            val tag = tags[key]
+            out[key] =
+                ZonePoint(posOf(tag?.languageValueId), posOf(tag?.typeValueId), frequencyPosition(key))
+        }
+        return out
     }
 
-    /** A key is "missing" if it has neither a tag nor an embedding row. */
-    private suspend fun isMissing(key: String): Boolean {
-        if (dao.tagFor(key) != null) return false
-        return qualityDao.get(key) == null && lineageDao.get(key) == null
+    override fun normalizedDistance(a: ZonePoint, b: ZonePoint): Float {
+        val dl = a.language - b.language
+        val dt = a.type - b.type
+        val df = a.frequency - b.frequency
+        val raw = kotlin.math.sqrt(dl * dl + dt * dt + df * df)
+        return (raw / ZONE_DIAGONAL).coerceIn(0f, 1f)
     }
-
-    /** Two axis values agree unless BOTH are set and differ (Rule A). */
-    private fun axesAgree(a: Long?, b: Long?): Boolean = a == null || b == null || a == b
 
     override suspend fun clear() {
         dao.nukeTags()
         dao.nukeValues()
-        lineageDao.nuke()
     }
 
     private companion object {
         const val HIGH_FREQUENT_NET = 3.0f
         const val HIGH_FREQUENT_PLAYS = 5
-        const val MAX_LINEAGE_HOPS = 32
+        const val FREQ_SHRINK_K = 5f
+        const val BATCH = 500
+        // Diagonal of the [-1,1]^3 cube: sqrt(2^2 + 2^2 + 2^2) = sqrt(12).
+        val ZONE_DIAGONAL = kotlin.math.sqrt(12f)
     }
 }
