@@ -384,6 +384,14 @@ constructor(
         val freqDir = if (w.frequency >= 0f) 1f else -1f
         val randShare = kotlin.math.abs(w.random) / magSum
 
+        // Random dissolves intentional structure: similarity/frequency shares
+        // already shrink as randShare grows (shared-budget normalization above);
+        // fade the cross-ring BIAS pull on the same schedule so at max random
+        // only the ring-distance skeleton + within-ring shuffle remain. Uses raw
+        // |random| (not the normalized share) so full random = full bias fade.
+        val biasFade = (1f - kotlin.math.abs(w.random)).coerceIn(0f, 1f)
+        val effectiveBiasWeight = BIAS_ORDER_WEIGHT * biasFade
+
         val used = BooleanArray(n)
         val order = IntArray(n)
         order[0] = start
@@ -439,8 +447,9 @@ constructor(
                 // Bias (per-user love/understand of the candidate's own tags).
                 // Added at ring scale so a strongly-loved-but-far tag can surface
                 // earlier than a closer-but-disliked one (combines across rings).
+                // Faded by Random (effectiveBiasWeight): more random = less bias.
                 // Sum of Language-understand + Type-love; neutral (0) = no effect.
-                val biasTerm = BIAS_ORDER_WEIGHT * (bias(iTag?.languageValueId) + bias(iTag?.typeValueId))
+                val biasTerm = effectiveBiasWeight * (bias(iTag?.languageValueId) + bias(iTag?.typeValueId))
 
                 val score = RING_SCALE * ringScore + biasTerm + within
                 if (score > bestScore) {
