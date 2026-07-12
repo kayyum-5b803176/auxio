@@ -63,6 +63,15 @@ constructor(
     private var currentSong: Song? = null
     private var lastPositionMs: Long = 0L
 
+    // Zero-drift "actually heard" measurement (Media3-driven). Real audio time
+    // is accumulated from WALL CLOCK, but only while the player reports
+    // isPlaying == true. isPlaying is true only when the position is genuinely
+    // advancing (not paused, buffering, seeking, or ended), so seeks contribute
+    // nothing by construction — the position jump never enters the math at all.
+    // `playedMs` is the real listened duration for the current song.
+    private var playedMs: Long = 0L
+    private var playingSinceMs: Long = -1L
+
     // Bug-2 fix (deferred edge scoring): the A->B edge must be judged by how
     // much of B actually played, which is only known when B itself ends. So we
     // remember the song that preceded the current one; when the current song
@@ -96,6 +105,15 @@ constructor(
         if (!pluginSettings.smartChainEnabled) return
         if (playbackManager.currentSong == currentSong) {
             lastPositionMs = positionMs
+        }
+    }
+
+    /** Fold any in-flight playing interval into playedMs and clear the marker. */
+    private fun foldPlayingInterval() {
+        if (playingSinceMs >= 0) {
+            val delta = System.currentTimeMillis() - playingSinceMs
+            if (delta > 0) playedMs += delta
+            playingSinceMs = -1L
         }
     }
 
@@ -136,8 +154,10 @@ constructor(
     }
 
     /**
-     * Forwarded from progression updates. Keeps [lastPositionMs] current for
-     * the playing song so we can measure how far it got when it ends.
+     * Forwarded from progression updates. Keeps [lastPositionMs] current and
+     * drives the wall-clock played-time accumulator off the isPlaying edge:
+     * time accrues only while the player is genuinely playing, so seeks and
+     * pauses never inflate it.
      */
     fun onProgression() {
         if (!pluginSettings.smartChainEnabled) {
@@ -150,10 +170,24 @@ constructor(
             return
         }
         if (song == currentSong) {
+            syncPlaying(playbackManager.progression.isPlaying)
             lastPositionMs = playbackManager.progression.calculateElapsedPositionMs()
         } else {
             L.d("SmartChain: onProgression detected song change to ${song.path.name}")
             handleSongChange(song)
+        }
+    }
+
+    /**
+     * Reconcile the accumulator with the current isPlaying state. Opens an
+     * interval on the not-playing -> playing edge; folds it on the reverse.
+     * Idempotent, so it's safe to call on every progression tick.
+     */
+    private fun syncPlaying(isPlaying: Boolean) {
+        if (isPlaying) {
+            if (playingSinceMs < 0) playingSinceMs = System.currentTimeMillis()
+        } else {
+            foldPlayingInterval()
         }
     }
 
@@ -167,6 +201,8 @@ constructor(
         if (!pluginSettings.smartChainEnabled) {
             currentSong = null
             lastPositionMs = 0L
+            playedMs = 0L
+            playingSinceMs = -1L
             return
         }
         val newSong = playbackManager.currentSong
@@ -191,11 +227,17 @@ constructor(
         val intent = consumeIntent()
         L.d("SmartChain: transition ${previous?.path?.name} -> ${newSong.path.name}, intent=$intent")
 
+        // The outgoing song was playing right up to this transition; fold the
+        // in-flight interval so playedMs is complete before we measure it.
+        foldPlayingInterval()
+
         if (previous != null) {
-            // How much of the OUTGOING song (`previous`) was actually heard.
+            // How much of the OUTGOING song (`previous`) was actually HEARD —
+            // real played audio (playedMs, wall-clock while isPlaying), NOT the
+            // raw playhead. Seeking never inflates this.
             val previousHeard =
                 if (previous.durationMs > 0) {
-                    (lastPositionMs.toFloat() / previous.durationMs).coerceIn(0f, 1f)
+                    (playedMs.toFloat() / previous.durationMs).coerceIn(0f, 1f)
                 } else {
                     0f
                 }
@@ -257,6 +299,11 @@ constructor(
 
         currentSong = newSong
         lastPositionMs = playbackManager.progression.calculateElapsedPositionMs()
+        // Reset the actual-played accumulator for the new song. If it's already
+        // playing at this instant, open a fresh interval so time counts from now.
+        playedMs = 0L
+        playingSinceMs =
+            if (playbackManager.progression.isPlaying) System.currentTimeMillis() else -1L
     }
 
     private fun recordEdgeAsync(from: Song, to: Song, fraction: Float, kind: String) {
@@ -294,6 +341,8 @@ constructor(
     fun reset() {
         currentSong = null
         lastPositionMs = 0L
+        playedMs = 0L
+        playingSinceMs = -1L
         lastIntent = null
         pendingFrom = null
         currentWasSelected = false
