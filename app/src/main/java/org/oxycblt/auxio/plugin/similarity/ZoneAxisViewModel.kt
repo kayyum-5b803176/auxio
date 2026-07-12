@@ -115,6 +115,11 @@ constructor(
         viewModelScope.launch { zoneAxisRepository.setRelation(valueIdA, valueIdB, relation) }
     }
 
+    /** Set the per-tag bias (love/understand), -1f..+1f. */
+    fun setBias(valueId: Long, bias: Float) {
+        viewModelScope.launch { zoneAxisRepository.setBias(valueId, bias) }
+    }
+
     // ---- queue-order sliders (within-ring blend) ------------------------
 
     var queueOrderSimilarity: Float

@@ -33,6 +33,7 @@
             android:layout_height="wrap_content"
             android:layout_marginHorizontal="@dimen/spacing_medium"
             android:layout_marginTop="@dimen/spacing_medium"
+            android:id="@+id/zone_pos_header"
             android:text="@string/lbl_zone_pos_header"
             android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
             android:textColor="?attr/colorPrimary" />

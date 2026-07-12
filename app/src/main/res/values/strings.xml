@@ -128,6 +128,8 @@
     <string name="lbl_zone_frequency">Frequency</string>
     <string name="lbl_zone_filter_clear">Clear all filters</string>
     <string name="lbl_zone_rename">Rename</string>
+    <string name="lbl_zone_bias_understand">How well do you understand %1$s?</string>
+    <string name="lbl_zone_bias_love">How much do you love %1$s?</string>
     <string name="lbl_queue_order_title">Queue order</string>
     <string name="lbl_queue_order_similarity">Similarity (−least / +most similar)</string>
     <string name="lbl_queue_order_frequency">Frequency (−least / +most played)</string>

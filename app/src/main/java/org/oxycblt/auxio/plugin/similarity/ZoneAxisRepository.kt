@@ -75,6 +75,21 @@ interface ZoneAxisRepository {
     /** Set (or clear at 0) the symmetric relative value between two values. */
     suspend fun setRelation(valueIdA: Long, valueIdB: Long, relation: Float)
 
+    /**
+     * Per-user, per-tag BIAS, -1f..+1f, default 0 (neutral = no effect). For
+     * Language this is "understand" (not-understand..understand); for Type it is
+     * "love" (hate..love). Orthogonal to relations: a property of one tag for
+     * this user, not a relationship between tags. Stored in the value's position
+     * column. Higher bias surfaces that tag's songs earlier and attracts more.
+     */
+    suspend fun setBias(valueId: Long, bias: Float)
+
+    /** Bias for a single value (0 if unset/missing). */
+    suspend fun biasOf(valueId: Long?): Float
+
+    /** All values' biases as id -> bias, for the ordering pass (skips 0). */
+    suspend fun biasByValue(): Map<Long, Float>
+
     /** Every stored relation touching [valueId], as (otherValueId -> relation). */
     suspend fun relationsForValue(valueId: Long): Map<Long, Float>
 
@@ -220,6 +235,21 @@ constructor(
         } else {
             dao.putRelation(ZoneRelation(low, high, clamped))
         }
+    }
+
+    override suspend fun setBias(valueId: Long, bias: Float) {
+        dao.updatePosition(valueId, bias.coerceIn(-1f, 1f))
+    }
+
+    override suspend fun biasOf(valueId: Long?): Float {
+        if (valueId == null) return 0f
+        return dao.valueById(valueId)?.position ?: 0f
+    }
+
+    override suspend fun biasByValue(): Map<Long, Float> {
+        val out = HashMap<Long, Float>()
+        for (v in dao.allValues()) if (v.position != 0f) out[v.id] = v.position
+        return out
     }
 
     override suspend fun relationsForValue(valueId: Long): Map<Long, Float> {

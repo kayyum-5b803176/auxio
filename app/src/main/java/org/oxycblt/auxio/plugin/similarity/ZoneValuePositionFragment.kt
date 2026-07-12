@@ -26,6 +26,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.fragment.navArgs
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.slider.Slider
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import dagger.hilt.android.AndroidEntryPoint
@@ -65,6 +66,20 @@ class ZoneValuePositionFragment : ViewBindingFragment<FragmentZoneValuePositionB
         binding.zonePosToolbar.setNavigationOnClickListener { findNavController().navigateUp() }
         binding.zonePosOthers.adapter = othersAdapter
 
+        // Bias slider (per-tag "understand" for Language / "love" for Type).
+        // Live readout; commit on release. Neutral 0 = no effect anywhere.
+        binding.zonePosSlider.addOnChangeListener { _, value, _ ->
+            binding.zonePosValue.text = "%+.2f".format(value)
+        }
+        binding.zonePosSlider.addOnSliderTouchListener(
+            object : Slider.OnSliderTouchListener {
+                override fun onStartTrackingTouch(slider: Slider) {}
+
+                override fun onStopTrackingTouch(slider: Slider) {
+                    zoneModel.setBias(args.valueId, slider.value)
+                }
+            })
+
         binding.zonePosToolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 R.id.action_rename -> {
@@ -94,6 +109,17 @@ class ZoneValuePositionFragment : ViewBindingFragment<FragmentZoneValuePositionB
             }
             binding.zonePosToolbar.title =
                 getString(R.string.fmt_zone_pos_title, self.label, self.axis)
+
+            // Contextual bias label + value (understand for Language, love for Type).
+            binding.zonePosHeader.text =
+                getString(
+                    if (self.axis == ZoneAxis.LANGUAGE) R.string.lbl_zone_bias_understand
+                    else R.string.lbl_zone_bias_love,
+                    self.label)
+            if (!binding.zonePosSlider.isPressed) {
+                binding.zonePosSlider.value = self.position.coerceIn(-1f, 1f)
+                binding.zonePosValue.text = "%+.2f".format(self.position)
+            }
 
             val siblings =
                 (if (self.axis == ZoneAxis.LANGUAGE) languages else types).filter {

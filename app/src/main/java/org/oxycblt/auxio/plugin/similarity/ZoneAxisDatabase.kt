@@ -65,6 +65,8 @@ interface ZoneAxisDao {
     @Query("SELECT * FROM ZoneAxisValue WHERE axis = :axis ORDER BY label COLLATE NOCASE ASC")
     suspend fun valuesForNow(axis: String): List<ZoneAxisValue>
 
+    @Query("SELECT * FROM ZoneAxisValue") suspend fun allValues(): List<ZoneAxisValue>
+
     @Query("SELECT * FROM ZoneAxisValue WHERE id = :id LIMIT 1")
     suspend fun valueById(id: Long): ZoneAxisValue?
 

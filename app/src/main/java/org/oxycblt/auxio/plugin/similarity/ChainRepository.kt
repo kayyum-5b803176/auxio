@@ -196,6 +196,13 @@ constructor(
         val zoneRel = if (kotlin.math.abs(langRel) >= kotlin.math.abs(typeRel)) langRel else typeRel
         pull += ZONE_LEARN_WEIGHT * zoneRel
 
+        // Bias nudge (per-user love/understand of the DESTINATION song's tags):
+        // transitioning into a loved/understood tag attracts a little more, into
+        // a hated/not-understood tag repels a little. Neutral (0) = no effect.
+        val toLangBias = zoneAxisRepository.biasOf(toTag?.languageValueId)
+        val toTypeBias = zoneAxisRepository.biasOf(toTag?.typeValueId)
+        pull += BIAS_LEARN_WEIGHT * (toLangBias + toTypeBias)
+
         applyPull(a, b, from, to, fromKey, toKey, pull, now, BASE_LEARNING_RATE)
 
         val pct = (listenedFraction * 100).toInt()
@@ -351,6 +358,9 @@ constructor(
             if (a == null || b == null || a == b) return 0f
             return relations[minOf(a, b) to maxOf(a, b)] ?: 0f
         }
+        // Per-tag bias (love/understand), sparse; unset/neutral = 0 = no effect.
+        val biases = zoneAxisRepository.biasByValue()
+        fun bias(id: Long?): Float = id?.let { biases[it] } ?: 0f
 
         val vectorOf = { i: Int ->
             val k = keys[i]
@@ -426,7 +436,13 @@ constructor(
                         freqShare * freqDir * freqOf(i) +
                         randShare * (Random.nextFloat() * 2f - 1f)
 
-                val score = RING_SCALE * ringScore + within
+                // Bias (per-user love/understand of the candidate's own tags).
+                // Added at ring scale so a strongly-loved-but-far tag can surface
+                // earlier than a closer-but-disliked one (combines across rings).
+                // Sum of Language-understand + Type-love; neutral (0) = no effect.
+                val biasTerm = BIAS_ORDER_WEIGHT * (bias(iTag?.languageValueId) + bias(iTag?.typeValueId))
+
+                val score = RING_SCALE * ringScore + biasTerm + within
                 if (score > bestScore) {
                     bestScore = score
                     bestI = i
@@ -519,6 +535,13 @@ constructor(
         const val RING_SCALE = 10.0f
         const val RING_TYPE_WEIGHT = 1.0f
         const val RING_LANG_WEIGHT = 0.6f
+
+        // Per-tag bias (love/understand). Learning: gentle nudge on the pull.
+        // Ordering: scaled so a strong bias (±1) is worth roughly one ring step
+        // (RING_SCALE), letting loved-but-far tags surface earlier while a
+        // neutral 0 bias contributes nothing. Tuning knobs; structure is fixed.
+        const val BIAS_LEARN_WEIGHT = 0.3f
+        const val BIAS_ORDER_WEIGHT = 5.0f
 
         // Recently-played guard: don't resurface a song heard within this many
         // picks unless nothing else remains.
