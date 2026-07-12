@@ -386,10 +386,11 @@ constructor(
 
         // Random dissolves intentional structure: similarity/frequency shares
         // already shrink as randShare grows (shared-budget normalization above);
-        // fade the cross-ring BIAS pull on the same schedule so at max random
-        // only the ring-distance skeleton + within-ring shuffle remain. Uses raw
-        // |random| (not the normalized share) so full random = full bias fade.
-        val biasFade = (1f - kotlin.math.abs(w.random)).coerceIn(0f, 1f)
+        // fade the cross-ring BIAS pull directionally by Random's SIGN — a linear
+        // map where -1 = full bias, 0 = half, +1 = no bias. (Random's magnitude
+        // still drives within-ring shuffle via randShare above; here its sign
+        // additionally controls how much user bias shapes cross-ring order.)
+        val biasFade = ((1f - w.random) / 2f).coerceIn(0f, 1f)
         val effectiveBiasWeight = BIAS_ORDER_WEIGHT * biasFade
 
         val used = BooleanArray(n)
