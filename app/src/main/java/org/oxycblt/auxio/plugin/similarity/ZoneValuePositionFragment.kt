@@ -26,7 +26,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.fragment.navArgs
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.slider.Slider
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import dagger.hilt.android.AndroidEntryPoint
@@ -45,7 +44,10 @@ import org.oxycblt.auxio.util.collectImmediately
 class ZoneValuePositionFragment : ViewBindingFragment<FragmentZoneValuePositionBinding>() {
     private val zoneModel: ZoneAxisViewModel by viewModels()
     private val args: ZoneValuePositionFragmentArgs by navArgs()
-    private val othersAdapter = ZonePositionOthersAdapter()
+    private val othersAdapter =
+        ZonePositionOthersAdapter { otherId, relation ->
+            zoneModel.setRelation(args.valueId, otherId, relation)
+        }
 
     /** Latch: true once the edited value has resolved at least once, so we only
      * auto-leave on a genuine delete, not during initial staggered flow load. */
@@ -77,63 +79,38 @@ class ZoneValuePositionFragment : ViewBindingFragment<FragmentZoneValuePositionB
             }
         }
 
-        // Live readout as the slider moves; commit to DB on release only.
-        binding.zonePosSlider.addOnChangeListener { _, value, _ ->
-            binding.zonePosValue.text = "%+.2f".format(value)
-            refreshOthers(binding.zonePosSlider.value)
-        }
-        binding.zonePosSlider.addOnSliderTouchListener(
-            object : Slider.OnSliderTouchListener {
-                override fun onStartTrackingTouch(slider: Slider) {}
-
-                override fun onStopTrackingTouch(slider: Slider) {
-                    zoneModel.setPosition(args.valueId, slider.value)
-                }
-            })
-
-        // Observe both axes' values; find our value + its siblings by id/axis.
+        // Observe both axes' values; find our value + its same-axis siblings.
         collectImmediately(zoneModel.languageValues, zoneModel.typeValues) { languages, types ->
             val self =
                 languages.firstOrNull { it.id == args.valueId }
                     ?: types.firstOrNull { it.id == args.valueId }
             if (self != null) seenValue = true
             if (self == null) {
-                // Only leave if we had ALREADY resolved the value at least once
-                // and it has now disappeared (genuine delete). This avoids the
-                // false-positive during initial load, where the two axis flows
-                // populate independently and start at emptyList() — a naive
-                // "not found -> navigateUp" fires instantly and bounces the user
-                // straight back to the previous screen before any data arrives.
+                // Only leave if we had ALREADY resolved the value once and it
+                // then disappeared (genuine delete). Avoids the false-positive
+                // during initial load where the axis flows start at emptyList().
                 if (seenValue) findNavController().navigateUp()
                 return@collectImmediately
             }
             binding.zonePosToolbar.title =
                 getString(R.string.fmt_zone_pos_title, self.label, self.axis)
 
-            // Set slider only when not actively being dragged (avoid fighting the user).
-            if (!binding.zonePosSlider.isPressed) {
-                binding.zonePosSlider.value = self.position.coerceIn(-1f, 1f)
-                binding.zonePosValue.text = "%+.2f".format(self.position)
-            }
-
             val siblings =
                 (if (self.axis == ZoneAxis.LANGUAGE) languages else types).filter {
                     it.id != self.id
                 }
-            othersAdapter.submitAgainst(binding.zonePosSlider.value, siblings)
             binding.zonePosOthers.isVisible = siblings.isNotEmpty()
-        }
-    }
 
-    private fun refreshOthers(selfPosition: Float) {
-        val languages = zoneModel.languageValues.value
-        val types = zoneModel.typeValues.value
-        val self =
-            languages.firstOrNull { it.id == args.valueId }
-                ?: types.firstOrNull { it.id == args.valueId } ?: return
-        val siblings =
-            (if (self.axis == ZoneAxis.LANGUAGE) languages else types).filter { it.id != self.id }
-        othersAdapter.submitAgainst(selfPosition, siblings)
+            // Load stored relations, then build one editable row per sibling
+            // (unset pairs show 0 = neutral).
+            viewLifecycleOwner.lifecycleScope.launch {
+                val relations = zoneModel.relationsForValue(self.id)
+                othersAdapter.submitList(
+                    siblings.map {
+                        ZonePositionOthersAdapter.Item(it.id, it.label, relations[it.id] ?: 0f)
+                    })
+            }
+        }
     }
 
     private fun showRenameDialog() {

@@ -42,8 +42,8 @@ import kotlinx.coroutines.flow.Flow
  * behavioral SongQuality score, never hand-assigned.
  */
 @Database(
-    entities = [ZoneAxisValue::class, SongZoneTag::class],
-    version = 2,
+    entities = [ZoneAxisValue::class, SongZoneTag::class, ZoneRelation::class],
+    version = 3,
     exportSchema = false)
 abstract class ZoneAxisDatabase : RoomDatabase() {
     abstract fun zoneAxisDao(): ZoneAxisDao
@@ -112,6 +112,32 @@ interface ZoneAxisDao {
     @Query("DELETE FROM ZoneAxisValue") suspend fun nukeValues()
 
     @Query("DELETE FROM SongZoneTag") suspend fun nukeTags()
+
+    // ---- relations (sparse pairwise relative values) --------------------
+
+    @Query(
+        "SELECT * FROM ZoneRelation WHERE valueIdLow = :low AND valueIdHigh = :high LIMIT 1")
+    suspend fun relation(low: Long, high: Long): ZoneRelation?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putRelation(relation: ZoneRelation)
+
+    @Query("DELETE FROM ZoneRelation WHERE valueIdLow = :low AND valueIdHigh = :high")
+    suspend fun deleteRelation(low: Long, high: Long)
+
+    /** Every relation touching [valueId] (either side) — for a value's editor page. */
+    @Query(
+        "SELECT * FROM ZoneRelation WHERE valueIdLow = :valueId OR valueIdHigh = :valueId")
+    suspend fun relationsFor(valueId: Long): List<ZoneRelation>
+
+    /** All relations (batched read for the ordering pass). */
+    @Query("SELECT * FROM ZoneRelation") suspend fun allRelations(): List<ZoneRelation>
+
+    /** Remove every relation referencing a value that's being deleted. */
+    @Query("DELETE FROM ZoneRelation WHERE valueIdLow = :valueId OR valueIdHigh = :valueId")
+    suspend fun deleteRelationsFor(valueId: Long)
+
+    @Query("DELETE FROM ZoneRelation") suspend fun nukeRelations()
 }
 
 /**
@@ -144,4 +170,18 @@ data class SongZoneTag(
     @PrimaryKey val songKey: String,
     val languageValueId: Long?,
     val typeValueId: Long?
+)
+
+/**
+ * A sparse, symmetric pairwise relationship between two values on the SAME axis,
+ * -1f..+1f (positive = similar/attract, negative = opposite/repel). Only pairs
+ * the user has explicitly set exist as rows; any unset pair defaults to 0f
+ * (neutral). The pair is stored canonically with [valueIdLow] < [valueIdHigh]
+ * so (A,B) and (B,A) map to a single row — the relationship is symmetric.
+ */
+@Entity(primaryKeys = ["valueIdLow", "valueIdHigh"])
+data class ZoneRelation(
+    val valueIdLow: Long,
+    val valueIdHigh: Long,
+    val relation: Float
 )

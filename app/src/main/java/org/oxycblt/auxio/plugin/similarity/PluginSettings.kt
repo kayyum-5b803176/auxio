@@ -64,6 +64,11 @@ interface PluginSettings : Settings<PluginSettings.Listener> {
      */
     val zoneAxisEnabled: Boolean
 
+    /** Queue-order sliders, -1f..+1f each (within-ring blend). Persisted. */
+    var queueOrderSimilarity: Float
+    var queueOrderFrequency: Float
+    var queueOrderRandom: Float
+
     interface Listener {
         /** Called when [similarityDetectionEnabled] changes. */
         fun onSimilarityDetectionChanged() {}
@@ -114,6 +119,30 @@ class PluginSettingsImpl @Inject constructor(@ApplicationContext private val con
     override val zoneAxisEnabled: Boolean
         get() =
             sharedPreferences.getBoolean(getString(R.string.set_key_zone_axis), false)
+
+    override var queueOrderSimilarity: Float
+        get() = sharedPreferences.getFloat(getString(R.string.set_key_queue_order_similarity), 1f)
+        set(value) {
+            sharedPreferences.edit {
+                putFloat(getString(R.string.set_key_queue_order_similarity), value)
+            }
+        }
+
+    override var queueOrderFrequency: Float
+        get() = sharedPreferences.getFloat(getString(R.string.set_key_queue_order_frequency), 0f)
+        set(value) {
+            sharedPreferences.edit {
+                putFloat(getString(R.string.set_key_queue_order_frequency), value)
+            }
+        }
+
+    override var queueOrderRandom: Float
+        get() = sharedPreferences.getFloat(getString(R.string.set_key_queue_order_random), 0f)
+        set(value) {
+            sharedPreferences.edit {
+                putFloat(getString(R.string.set_key_queue_order_random), value)
+            }
+        }
 
     override fun onSettingChanged(key: String, listener: PluginSettings.Listener) {
         when (key) {

@@ -41,10 +41,7 @@ interface ZoneAxisRepository {
 
     suspend fun renameValue(id: Long, newLabel: String)
 
-    /** Set a value's axis position (-1f..+1f). */
-    suspend fun setPosition(id: Long, position: Float)
-
-    /** Delete a value and un-assign it from all songs. */
+    /** Delete a value and un-assign it from all songs (and drop its relations). */
     suspend fun deleteValue(id: Long)
 
     /** How many songs currently use this value (for a delete confirmation). */
@@ -53,35 +50,39 @@ interface ZoneAxisRepository {
     /** The current tag assignment for [song], resolved to its ChainKey. */
     suspend fun tagFor(song: Song): SongZoneTag?
 
+    /** The tag assignment for an already-resolved ChainKey (ordering/learning path). */
+    suspend fun tagForKey(songKey: String): SongZoneTag?
+
+    /** Batch tag lookup for the ordering pass. */
+    suspend fun tagsForKeys(songKeys: List<String>): List<SongZoneTag>
+
     /** Set (or clear, with null) the given axis value on [song]. */
     suspend fun assign(song: Song, axis: String, valueId: Long?)
 
     /** Frequency tier for [song], derived live from behavioral quality data. */
     suspend fun frequencyOf(song: Song): FrequencyTier
 
-    /**
-     * The 3D zone-space coordinate for a song key: (languagePos, typePos,
-     * frequencyPos). Language/Type come from the assigned values' slider
-     * positions (blank axis = 0, neutral center). Frequency is computed live,
-     * per-song, from listening behavior. Used by both learning and ordering.
-     */
-    suspend fun zonePosition(songKey: String): ZonePoint
-
-    /** Batch form of [zonePosition] for the ordering pass. */
-    suspend fun zonePositions(songKeys: List<String>): Map<String, ZonePoint>
+    /** Continuous per-song frequency signal in -1f..+1f (from play/skip history). */
+    suspend fun frequencyOf(songKey: String): Float
 
     /**
-     * Normalized 0..1 zone-distance between two coordinates: raw Euclidean
-     * distance divided by the cube diagonal (sqrt(12) ~= 3.46), so it lines up
-     * with the roughly -1..1 listening-pull scale for blending.
+     * The stored relative value between two axis values, -1f..+1f (positive =
+     * similar/attract, negative = opposite/repel). Symmetric; unset pairs and
+     * any pair involving a null id return 0f (neutral).
      */
-    fun normalizedDistance(a: ZonePoint, b: ZonePoint): Float
+    suspend fun relationBetween(valueIdA: Long?, valueIdB: Long?): Float
+
+    /** Set (or clear at 0) the symmetric relative value between two values. */
+    suspend fun setRelation(valueIdA: Long, valueIdB: Long, relation: Float)
+
+    /** Every stored relation touching [valueId], as (otherValueId -> relation). */
+    suspend fun relationsForValue(valueId: Long): Map<Long, Float>
+
+    /** All stored relations as a lookup map keyed by canonical (low, high) pair. */
+    suspend fun allRelations(): Map<Pair<Long, Long>, Float>
 
     suspend fun clear()
 }
-
-/** A song's point in the 3D zone-space. Each component is -1f..+1f. */
-data class ZonePoint(val language: Float, val type: Float, val frequency: Float)
 
 class ZoneAxisRepositoryImpl
 @Inject
@@ -116,16 +117,13 @@ constructor(
         dao.updateValue(current.copy(label = clean))
     }
 
-    override suspend fun setPosition(id: Long, position: Float) {
-        dao.updatePosition(id, position.coerceIn(-1f, 1f))
-    }
-
     override suspend fun deleteValue(id: Long) {
         val value = dao.valueById(id) ?: return
         when (value.axis) {
             ZoneAxis.LANGUAGE -> dao.clearLanguageValue(id)
             ZoneAxis.TYPE -> dao.clearTypeValue(id)
         }
+        dao.deleteRelationsFor(id)
         dao.deleteValue(id)
     }
 
@@ -139,6 +137,15 @@ constructor(
     }
 
     override suspend fun tagFor(song: Song): SongZoneTag? = dao.tagFor(keyOf(song))
+
+    override suspend fun tagForKey(songKey: String): SongZoneTag? = dao.tagFor(songKey)
+
+    override suspend fun tagsForKeys(songKeys: List<String>): List<SongZoneTag> {
+        if (songKeys.isEmpty()) return emptyList()
+        val out = ArrayList<SongZoneTag>()
+        for (chunk in songKeys.chunked(BATCH)) out.addAll(dao.tagsFor(chunk))
+        return out
+    }
 
     override suspend fun assign(song: Song, axis: String, valueId: Long?) {
         val key = keyOf(song)
@@ -159,6 +166,8 @@ constructor(
         return frequencyOfKey(key)
     }
 
+    override suspend fun frequencyOf(songKey: String): Float = frequencyPosition(songKey)
+
     private suspend fun frequencyOfKey(key: String): FrequencyTier {
         val q = qualityDao.get(key) ?: return FrequencyTier.LOW_FREQUENT
         val net = q.positiveScore - q.negativeScore
@@ -176,11 +185,10 @@ constructor(
     }
 
     /**
-     * Frequency coordinate on Z: continuous, per-song, from listening behavior.
-     * r = play ratio in -1..1; shrunk toward 0 by sample size so a song with
-     * little history stays near neutral center (never-played -> exactly 0, the
-     * same neutral as a blank tag — the system doesn't exile the unknown, only
-     * the known-disliked). Redemption is automatic: clean plays pull it back up.
+     * Continuous per-song frequency signal in -1..1 from listening behavior.
+     * r = play ratio; shrunk toward 0 by sample size so a song with little
+     * history stays near neutral center (never-played -> exactly 0). Used as a
+     * within-ring ordering signal, never a gate.
      */
     private suspend fun frequencyPosition(key: String): Float {
         val q = qualityDao.get(key) ?: return 0f
@@ -193,46 +201,45 @@ constructor(
         return ((2f * r) - 1f) * shrink // -1..1
     }
 
-    override suspend fun zonePosition(songKey: String): ZonePoint {
-        val tag = dao.tagFor(songKey)
-        val lang = tag?.languageValueId?.let { dao.valueById(it)?.position } ?: 0f
-        val type = tag?.typeValueId?.let { dao.valueById(it)?.position } ?: 0f
-        val freq = frequencyPosition(songKey)
-        return ZonePoint(lang, type, freq)
+    override suspend fun relationBetween(valueIdA: Long?, valueIdB: Long?): Float {
+        if (valueIdA == null || valueIdB == null || valueIdA == valueIdB) return 0f
+        val low = minOf(valueIdA, valueIdB)
+        val high = maxOf(valueIdA, valueIdB)
+        return dao.relation(low, high)?.relation ?: 0f
     }
 
-    override suspend fun zonePositions(songKeys: List<String>): Map<String, ZonePoint> {
-        if (songKeys.isEmpty()) return emptyMap()
-        // Batch the tag lookups; resolve value positions through a small cache
-        // so repeated value ids don't re-query.
-        val tags = HashMap<String, SongZoneTag>()
-        for (chunk in songKeys.chunked(BATCH)) {
-            for (t in dao.tagsFor(chunk)) tags[t.songKey] = t
+    override suspend fun setRelation(valueIdA: Long, valueIdB: Long, relation: Float) {
+        if (valueIdA == valueIdB) return
+        val low = minOf(valueIdA, valueIdB)
+        val high = maxOf(valueIdA, valueIdB)
+        val clamped = relation.coerceIn(-1f, 1f)
+        // Storing exactly 0 (neutral) is the same as having no row — keep the
+        // table sparse by deleting instead.
+        if (clamped == 0f) {
+            dao.deleteRelation(low, high)
+        } else {
+            dao.putRelation(ZoneRelation(low, high, clamped))
         }
-        val posCache = HashMap<Long, Float>()
-        suspend fun posOf(id: Long?): Float {
-            if (id == null) return 0f
-            return posCache.getOrPut(id) { dao.valueById(id)?.position ?: 0f }
-        }
-        val out = HashMap<String, ZonePoint>(songKeys.size)
-        for (key in songKeys) {
-            val tag = tags[key]
-            out[key] =
-                ZonePoint(posOf(tag?.languageValueId), posOf(tag?.typeValueId), frequencyPosition(key))
+    }
+
+    override suspend fun relationsForValue(valueId: Long): Map<Long, Float> {
+        val out = HashMap<Long, Float>()
+        for (r in dao.relationsFor(valueId)) {
+            val other = if (r.valueIdLow == valueId) r.valueIdHigh else r.valueIdLow
+            out[other] = r.relation
         }
         return out
     }
 
-    override fun normalizedDistance(a: ZonePoint, b: ZonePoint): Float {
-        val dl = a.language - b.language
-        val dt = a.type - b.type
-        val df = a.frequency - b.frequency
-        val raw = kotlin.math.sqrt(dl * dl + dt * dt + df * df)
-        return (raw / ZONE_DIAGONAL).coerceIn(0f, 1f)
+    override suspend fun allRelations(): Map<Pair<Long, Long>, Float> {
+        val out = HashMap<Pair<Long, Long>, Float>()
+        for (r in dao.allRelations()) out[r.valueIdLow to r.valueIdHigh] = r.relation
+        return out
     }
 
     override suspend fun clear() {
         dao.nukeTags()
+        dao.nukeRelations()
         dao.nukeValues()
     }
 
@@ -241,7 +248,5 @@ constructor(
         const val HIGH_FREQUENT_PLAYS = 5
         const val FREQ_SHRINK_K = 5f
         const val BATCH = 500
-        // Diagonal of the [-1,1]^3 cube: sqrt(2^2 + 2^2 + 2^2) = sqrt(12).
-        val ZONE_DIAGONAL = kotlin.math.sqrt(12f)
     }
 }

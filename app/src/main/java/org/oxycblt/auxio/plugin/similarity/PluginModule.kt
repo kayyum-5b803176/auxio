@@ -59,6 +59,22 @@ val MIGRATION_ZONE_1_2 =
         }
     }
 
+/**
+ * Zone DB v2 -> v3: adds the ZoneRelation table (sparse pairwise relative
+ * values). Purely additive; existing values/tags/positions are preserved.
+ */
+val MIGRATION_ZONE_2_3 =
+    object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `ZoneRelation` (" +
+                    "`valueIdLow` INTEGER NOT NULL, " +
+                    "`valueIdHigh` INTEGER NOT NULL, " +
+                    "`relation` REAL NOT NULL, " +
+                    "PRIMARY KEY(`valueIdLow`, `valueIdHigh`))")
+        }
+    }
+
 @Module
 @InstallIn(SingletonComponent::class)
 interface PluginModule {
@@ -127,7 +143,7 @@ class PluginRoomModule {
             // Same policy as ChainDatabase: user-authored tags must never be
             // silently wiped on upgrade. Future schema changes ship an explicit
             // Migration; only downgrades may reset.
-            .addMigrations(MIGRATION_ZONE_1_2)
+            .addMigrations(MIGRATION_ZONE_1_2, MIGRATION_ZONE_2_3)
             .fallbackToDestructiveMigrationOnDowngrade()
             .build()
 

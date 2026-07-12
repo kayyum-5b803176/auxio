@@ -34,6 +34,14 @@ import timber.log.Timber as L
  * larger step. New songs are seeded from metadata (artist/genre) so same-artist
  * tracks start clustered before any play — solving cold start by construction.
  */
+/**
+ * The three within-ring ordering sliders, each -1f..+1f. Magnitude = strength,
+ * sign = direction (positive similarity/frequency/random = more-similar /
+ * most-played / more-shuffled first; negative = the mirror). Magnitudes
+ * normalize into shares summing to 1 when applied.
+ */
+data class QueueOrderWeights(val similarity: Float, val frequency: Float, val random: Float)
+
 interface ChainRepository {
     /**
      * Learn from an observed transition: [from] played, then [to] played and was
@@ -78,6 +86,7 @@ constructor(
     private val fingerprintRepository: FingerprintRepository,
     private val musicRepository: org.oxycblt.auxio.music.MusicRepository,
     private val zoneAxisRepository: ZoneAxisRepository,
+    private val pluginSettings: PluginSettings,
     private val chainLog: ChainLog
 ) : ChainRepository {
 
@@ -170,17 +179,29 @@ constructor(
         // opposite-tagged songs apart even without a skip — but it never ADDS
         // attraction (blank axes sit at 0, so a bonus there would pull the whole
         // untagged library together, re-creating cross-zone contamination).
-        val fromZone = zoneAxisRepository.zonePosition(fromKey)
-        val toZone = zoneAxisRepository.zonePosition(toKey)
-        val zd = zoneAxisRepository.normalizedDistance(fromZone, toZone)
-        pull -= ZONE_LEARN_WEIGHT * zd
+        // Zone blend (relative-lookup): look up the stored pairwise relative
+        // value between the two songs' tags on each axis (Language, Type),
+        // -1..+1, unset = 0 (neutral). The more extreme axis dominates (a strong
+        // opposition on EITHER axis should be felt), and the signed relation is
+        // added to the pull: negative relations (opposite tags) subtract, driving
+        // repulsion even on a clean listen; positive relations reinforce. Blank
+        // tags contribute 0 — neither helping nor hurting.
+        val fromTag = zoneAxisRepository.tagForKey(fromKey)
+        val toTag = zoneAxisRepository.tagForKey(toKey)
+        val langRel =
+            zoneAxisRepository.relationBetween(fromTag?.languageValueId, toTag?.languageValueId)
+        val typeRel =
+            zoneAxisRepository.relationBetween(fromTag?.typeValueId, toTag?.typeValueId)
+        // Most-extreme-wins: pick the relation with the largest magnitude.
+        val zoneRel = if (kotlin.math.abs(langRel) >= kotlin.math.abs(typeRel)) langRel else typeRel
+        pull += ZONE_LEARN_WEIGHT * zoneRel
 
         applyPull(a, b, from, to, fromKey, toKey, pull, now, BASE_LEARNING_RATE)
 
         val pct = (listenedFraction * 100).toInt()
         val sim = cosine(embeddingDao.get(fromKey)!!.vector, embeddingDao.get(toKey)!!.vector)
         val keyKind = if (fromKey.startsWith("uid:")) " [uid]" else ""
-        val zoneNote = if (zd > 0.01f) " zd=${"%.2f".format(zd)}" else ""
+        val zoneNote = if (zoneRel != 0f) " rel=${"%+.2f".format(zoneRel)}" else ""
         chainLog.log(
             "$kind: ${nameOf(from)} → ${nameOf(to)} (heard $pct%, sim now ${"%.2f".format(sim)}$zoneNote)$keyKind")
     }
@@ -316,12 +337,20 @@ constructor(
         for (chunk in distinctKeys.chunked(BATCH)) {
             for (e in embeddingDao.getAll(chunk)) vecByKey[e.key] = e.vector
         }
-        val qualByKey = HashMap<String, Float>()
+        val freqByKey = HashMap<String, Float>()
+        for (k in distinctKeys) freqByKey[k] = zoneAxisRepository.frequencyOf(k)
+
+        // Tags per key (which Language/Type value each song carries), batched.
+        val tagByKey = HashMap<String, SongZoneTag>()
         for (chunk in distinctKeys.chunked(BATCH)) {
-            for (q in qualityDao.getAll(chunk)) qualByKey[q.key] = q.positiveScore - q.negativeScore
+            for (t in zoneAxisRepository.tagsForKeys(chunk)) tagByKey[t.songKey] = t
         }
-        // Zone-space coordinates per key, computed once (batched).
-        val zoneByKey = zoneAxisRepository.zonePositions(distinctKeys)
+        // All stored relations (sparse) for cheap in-memory lookup during the walk.
+        val relations = zoneAxisRepository.allRelations()
+        fun rel(a: Long?, b: Long?): Float {
+            if (a == null || b == null || a == b) return 0f
+            return relations[minOf(a, b) to maxOf(a, b)] ?: 0f
+        }
 
         val vectorOf = { i: Int ->
             val k = keys[i]
@@ -331,8 +360,19 @@ constructor(
                 else -> seedVector(heap[i], k).also { vecByKey[k] = it }
             }
         }
-        val qualOf = { i: Int -> keys[i]?.let { qualByKey[it] } ?: 0f }
-        val zoneOf = { i: Int -> keys[i]?.let { zoneByKey[it] } ?: ZonePoint(0f, 0f, 0f) }
+        val tagOf = { i: Int -> keys[i]?.let { tagByKey[it] } }
+        val freqOf = { i: Int -> keys[i]?.let { freqByKey[it] } ?: 0f }
+
+        // Within-ring order weights (the 3-slider blend). Magnitudes normalize
+        // into shares summing to 1; sign gives direction (see QueueOrderWeights).
+        val w = queueOrderWeights()
+        val magSum = (kotlin.math.abs(w.similarity) + kotlin.math.abs(w.frequency) +
+            kotlin.math.abs(w.random)).coerceAtLeast(1e-4f)
+        val simShare = kotlin.math.abs(w.similarity) / magSum
+        val simDir = if (w.similarity >= 0f) 1f else -1f
+        val freqShare = kotlin.math.abs(w.frequency) / magSum
+        val freqDir = if (w.frequency >= 0f) 1f else -1f
+        val randShare = kotlin.math.abs(w.random) / magSum
 
         val used = BooleanArray(n)
         val order = IntArray(n)
@@ -341,35 +381,70 @@ constructor(
         var current = start
         var filled = 1
 
+        // Recently-played guard: avoid resurfacing a song heard in the last N
+        // picks unless nothing else is available (soft, not a hard rule).
+        val recent = ArrayDeque<String>()
+        fun pushRecent(i: Int) {
+            keys[i]?.let {
+                recent.addLast(it)
+                while (recent.size > RECENT_WINDOW) recent.removeFirst()
+            }
+        }
+        pushRecent(start)
+
         for (pos in 1 until n) {
+            val curTag = tagOf(current)
             val cur = vectorOf(current)
-            val curZone = zoneOf(current)
-            // Continuous score: vector similarity minus the normalized zone
-            // distance (weighted), plus a small quality tiebreak. No hard block —
-            // a zone-far song is demoted, not excluded, so learning never stalls.
-            // Similarity spans 2.0 (-1..1) while the zone penalty maxes at
-            // ZONE_ORDER_WEIGHT: tags can gate, but only accumulated listening
-            // (deeply negative similarity) can truly veto a pairing.
-            val scored = ArrayList<Pair<Int, Float>>(n)
+
+            // Score every remaining candidate. The zone relation to the current
+            // song decides the RING (cascade priority): songs sharing tags rank
+            // highest; then nearest Language under same Type; then Type expands
+            // positive-first, negatives last. This is one continuous score that
+            // reproduces the staged cascade because relation magnitude dominates
+            // the within-ring blend.
+            var bestI = -1
+            var bestScore = -Float.MAX_VALUE
+            var bestNonRecentI = -1
+            var bestNonRecentScore = -Float.MAX_VALUE
             for (i in 0 until n) {
                 if (used[i]) continue
                 val v = vectorOf(i)
                 val sim = if (v == null || cur == null) -1f else cosine(cur, v)
-                val zd = zoneAxisRepository.normalizedDistance(curZone, zoneOf(i))
-                scored.add(i to (sim - ZONE_ORDER_WEIGHT * zd + QUALITY_TIEBREAK * qualOf(i)))
-            }
-            if (scored.isEmpty()) break
-            scored.sortByDescending { it.second }
-            val next =
-                if (explore) {
-                    val k = minOf(EXPLORE_TOP_K, scored.size)
-                    scored[Random.nextInt(k)].first
-                } else {
-                    scored[0].first
+                val iTag = tagOf(i)
+                // Ring priority: Type first (mood), then Language, most-extreme
+                // relation wins; positive attracts, negative pushes to the tail.
+                val typeRel = rel(curTag?.typeValueId, iTag?.typeValueId)
+                val langRel = rel(curTag?.languageValueId, iTag?.languageValueId)
+                // Type weighted heavier than Language so mood leads the cascade.
+                val ringScore = RING_TYPE_WEIGHT * typeRel + RING_LANG_WEIGHT * langRel
+
+                // Within-ring blend: similarity + frequency (signed) + random,
+                // by normalized shares. Kept an order of magnitude below the ring
+                // term so it only sorts WITHIN a ring, never across rings.
+                val within =
+                    simShare * simDir * sim +
+                        freqShare * freqDir * freqOf(i) +
+                        randShare * (Random.nextFloat() * 2f - 1f)
+
+                val score = RING_SCALE * ringScore + within
+                if (score > bestScore) {
+                    bestScore = score
+                    bestI = i
                 }
+                val isRecent = keys[i] in recent
+                if (!isRecent && score > bestNonRecentScore) {
+                    bestNonRecentScore = score
+                    bestNonRecentI = i
+                }
+            }
+            if (bestI < 0) break
+            // Prefer the best non-recent candidate; fall back to best overall
+            // only if everything left was recently played.
+            val next = if (bestNonRecentI >= 0) bestNonRecentI else bestI
             order[pos] = next
             used[next] = true
             current = next
+            pushRecent(next)
             filled++
         }
 
@@ -383,6 +458,12 @@ constructor(
         }
         return order
     }
+
+    private fun queueOrderWeights(): QueueOrderWeights =
+        QueueOrderWeights(
+            similarity = pluginSettings.queueOrderSimilarity,
+            frequency = pluginSettings.queueOrderFrequency,
+            random = pluginSettings.queueOrderRandom)
 
     override suspend fun clear() {
         embeddingDao.nuke()
@@ -425,14 +506,23 @@ constructor(
         const val JUMP_BACK_BONUS = 1.0f
         const val QUALITY_TIEBREAK = 0.15f // similarity dominates; quality breaks ties
 
-        // Zone-space blend (Language x Type x Frequency 3D distance).
-        // Learning: "firm" ~= 1.0, roughly equal to a typical listening pull, so
-        //   a solidly-opposite tag pair can flip a clean listen to net repel.
-        // Ordering: penalty maxes at this weight while similarity spans 2.0, so
-        //   tags demote/gate but only accumulated listening can truly veto.
-        // Both are on-device tuning knobs; the structure won't change if they do.
+        // Zone learning blend: signed relative value added to the listening
+        // pull. "Firm" ~= 1.0 so a solidly-opposite tag pair (-1) can flip a
+        // clean listen to net repel, and an aligned pair (+1) reinforces.
         const val ZONE_LEARN_WEIGHT = 1.0f
-        const val ZONE_ORDER_WEIGHT = 1.0f
+
+        // Cascade ordering. The ring term (relation to the current song) is
+        // scaled far above the within-ring blend so songs sort into rings first
+        // (same tags -> nearest Language -> Type positive-first -> negatives
+        // last) and only sort by similarity/frequency/random WITHIN a ring.
+        // Type leads the cascade (mood matters most), Language second.
+        const val RING_SCALE = 10.0f
+        const val RING_TYPE_WEIGHT = 1.0f
+        const val RING_LANG_WEIGHT = 0.6f
+
+        // Recently-played guard: don't resurface a song heard within this many
+        // picks unless nothing else remains.
+        const val RECENT_WINDOW = 3
 
         // Cold-start seeding weights.
         const val ARTIST_SEED_WEIGHT = 1.0f

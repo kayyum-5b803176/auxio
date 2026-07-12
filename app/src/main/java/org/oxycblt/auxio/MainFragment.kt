@@ -22,9 +22,11 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.Menu
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.view.WindowInsets
 import android.widget.PopupMenu
+import android.widget.PopupWindow
 import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedCallback
 import androidx.core.view.ViewCompat
@@ -260,6 +262,11 @@ class MainFragment :
         }
 
         val all = getString(R.string.lbl_zone_all)
+        // Long-press the "Queue" title -> compact 3-slider queue-order popup.
+        binding.queueTitle.setOnLongClickListener {
+            showQueueOrderPopup(it)
+            true
+        }
         collectImmediately(zoneModel.languageValues, zoneModel.currentTag) { values, tag ->
             val label = values.firstOrNull { it.id == tag?.languageValueId }?.label ?: all
             language.text = getString(R.string.lbl_zone_value_arrow, label)
@@ -268,6 +275,46 @@ class MainFragment :
             val label = values.firstOrNull { it.id == tag?.typeValueId }?.label ?: all
             type.text = getString(R.string.lbl_zone_value_arrow, label)
         }
+    }
+
+    /**
+     * Compact anchored popup with the three within-ring ordering sliders
+     * (Similarity, Frequency, Random), each -1..+1. Persists on release. Not a
+     * PopupMenu (which can't host sliders) — a PopupWindow over a custom card.
+     */
+    private fun showQueueOrderPopup(anchor: View) {
+        val view =
+            LayoutInflater.from(requireContext())
+                .inflate(R.layout.popup_queue_order, null, false)
+        val simSlider = view.findViewById<com.google.android.material.slider.Slider>(
+            R.id.queue_order_similarity)
+        val freqSlider = view.findViewById<com.google.android.material.slider.Slider>(
+            R.id.queue_order_frequency)
+        val randSlider = view.findViewById<com.google.android.material.slider.Slider>(
+            R.id.queue_order_random)
+
+        simSlider.value = zoneModel.queueOrderSimilarity.coerceIn(-1f, 1f)
+        freqSlider.value = zoneModel.queueOrderFrequency.coerceIn(-1f, 1f)
+        randSlider.value = zoneModel.queueOrderRandom.coerceIn(-1f, 1f)
+
+        simSlider.addOnChangeListener { _, v, fromUser ->
+            if (fromUser) zoneModel.queueOrderSimilarity = v
+        }
+        freqSlider.addOnChangeListener { _, v, fromUser ->
+            if (fromUser) zoneModel.queueOrderFrequency = v
+        }
+        randSlider.addOnChangeListener { _, v, fromUser ->
+            if (fromUser) zoneModel.queueOrderRandom = v
+        }
+
+        val popup =
+            PopupWindow(
+                view,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                true)
+        popup.elevation = 8f * resources.displayMetrics.density
+        popup.showAsDropDown(anchor)
     }
 
     /**

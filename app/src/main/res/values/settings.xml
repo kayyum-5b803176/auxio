@@ -201,6 +201,9 @@
     <string name="set_key_smart_chain" translatable="false">auxio_smart_chain</string>
     <string name="set_key_smart_chain_logs" translatable="false">auxio_smart_chain_logs</string>
     <string name="set_key_zone_axis" translatable="false">auxio_zone_axis</string>
+    <string name="set_key_queue_order_similarity" translatable="false">auxio_queue_order_similarity</string>
+    <string name="set_key_queue_order_frequency" translatable="false">auxio_queue_order_frequency</string>
+    <string name="set_key_queue_order_random" translatable="false">auxio_queue_order_random</string>
     <string name="set_key_zone_axis_manage" translatable="false">auxio_zone_axis_manage</string>
     <string name="set_key_zone_filter_language" translatable="false">auxio_zone_filter_language</string>
     <string name="set_key_zone_filter_type" translatable="false">auxio_zone_filter_type</string>

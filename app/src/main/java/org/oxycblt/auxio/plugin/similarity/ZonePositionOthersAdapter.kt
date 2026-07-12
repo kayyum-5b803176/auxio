@@ -20,23 +20,24 @@ package org.oxycblt.auxio.plugin.similarity
 
 import android.view.LayoutInflater
 import android.view.ViewGroup
+import com.google.android.material.slider.Slider
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import kotlin.math.abs
-import org.oxycblt.auxio.R
 import org.oxycblt.auxio.databinding.ItemZonePosOtherBinding
 
 /**
- * Read-only list of the OTHER values on the same axis as the value being edited,
- * each showing its own position and its raw single-axis gap from the edited
- * value. Sorted nearest-first. Rebuilt whenever the edited value's slider moves.
+ * Editable list of the OTHER values on the same axis as the value being edited.
+ * Each row has its own slider setting the symmetric relative value between that
+ * value and the one being edited (-1..+1, positive = similar, negative =
+ * opposite). Commits on release via [onRelationSet].
  */
-class ZonePositionOthersAdapter :
-    ListAdapter<ZonePositionOthersAdapter.Item, ZonePositionOthersAdapter.ViewHolder>(DIFFER) {
+class ZonePositionOthersAdapter(
+    private val onRelationSet: (otherValueId: Long, relation: Float) -> Unit
+) : ListAdapter<ZonePositionOthersAdapter.Item, ZonePositionOthersAdapter.ViewHolder>(DIFFER) {
 
-    /** An other-value row: its label, its own position, and the gap to compare against. */
-    data class Item(val id: Long, val label: String, val position: Float, val gap: Float)
+    /** An other-value row: its id, label, and the currently-stored relation. */
+    data class Item(val id: Long, val label: String, val relation: Float)
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val inflater = LayoutInflater.from(parent.context)
@@ -51,21 +52,25 @@ class ZonePositionOthersAdapter :
         RecyclerView.ViewHolder(binding.root) {
         fun bind(item: Item) {
             binding.zonePosOtherLabel.text = item.label
-            binding.zonePosOtherPosition.text = "%+.2f".format(item.position)
-            binding.zonePosOtherGap.text =
-                binding.root.context.getString(R.string.lbl_zone_pos_gap, "%.2f".format(item.gap))
-        }
-    }
+            binding.zonePosOtherValue.text = "%+.2f".format(item.relation)
+            // Clear any previous listeners before setting the value, so recycled
+            // rows don't fire the old row's callback when we programmatically
+            // set the slider position.
+            binding.zonePosOtherSlider.clearOnChangeListeners()
+            binding.zonePosOtherSlider.clearOnSliderTouchListeners()
+            binding.zonePosOtherSlider.value = item.relation.coerceIn(-1f, 1f)
+            binding.zonePosOtherSlider.addOnChangeListener { _, value, _ ->
+                binding.zonePosOtherValue.text = "%+.2f".format(value)
+            }
+            binding.zonePosOtherSlider.addOnSliderTouchListener(
+                object : Slider.OnSliderTouchListener {
+                    override fun onStartTrackingTouch(slider: Slider) {}
 
-    /**
-     * Build a nearest-first list of [others] compared against [selfPosition].
-     * Gap is the raw single-axis absolute difference (0..2).
-     */
-    fun submitAgainst(selfPosition: Float, others: List<ZoneAxisValue>) {
-        submitList(
-            others
-                .map { Item(it.id, it.label, it.position, abs(it.position - selfPosition)) }
-                .sortedBy { it.gap })
+                    override fun onStopTrackingTouch(slider: Slider) {
+                        onRelationSet(item.id, slider.value)
+                    }
+                })
+        }
     }
 
     private companion object {

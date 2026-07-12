@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="280dp"
+    android:layout_height="wrap_content"
+    android:background="?attr/colorSurfaceContainerHigh"
+    android:orientation="vertical"
+    android:paddingHorizontal="@dimen/spacing_medium"
+    android:paddingVertical="@dimen/spacing_small">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingVertical="@dimen/spacing_small"
+        android:text="@string/lbl_queue_order_title"
+        android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
+        android:textColor="?attr/colorPrimary" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/lbl_queue_order_similarity"
+        android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
+
+    <com.google.android.material.slider.Slider
+        android:id="@+id/queue_order_similarity"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:stepSize="0.05"
+        android:valueFrom="-1.0"
+        android:valueTo="1.0" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/lbl_queue_order_frequency"
+        android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
+
+    <com.google.android.material.slider.Slider
+        android:id="@+id/queue_order_frequency"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:stepSize="0.05"
+        android:valueFrom="-1.0"
+        android:valueTo="1.0" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/lbl_queue_order_random"
+        android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
+
+    <com.google.android.material.slider.Slider
+        android:id="@+id/queue_order_random"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:stepSize="0.05"
+        android:valueFrom="-1.0"
+        android:valueTo="1.0"
+        tools:ignore="SpeakableTextPresentCheck" />
+
+</LinearLayout>

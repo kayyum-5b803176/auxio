@@ -110,9 +110,34 @@ constructor(
         viewModelScope.launch { zoneAxisRepository.renameValue(id, newLabel) }
     }
 
-    fun setPosition(id: Long, position: Float) {
-        viewModelScope.launch { zoneAxisRepository.setPosition(id, position) }
+    /** Set the symmetric relative value between two axis values (-1f..+1f). */
+    fun setRelation(valueIdA: Long, valueIdB: Long, relation: Float) {
+        viewModelScope.launch { zoneAxisRepository.setRelation(valueIdA, valueIdB, relation) }
     }
+
+    // ---- queue-order sliders (within-ring blend) ------------------------
+
+    var queueOrderSimilarity: Float
+        get() = pluginSettings.queueOrderSimilarity
+        set(value) {
+            pluginSettings.queueOrderSimilarity = value
+        }
+
+    var queueOrderFrequency: Float
+        get() = pluginSettings.queueOrderFrequency
+        set(value) {
+            pluginSettings.queueOrderFrequency = value
+        }
+
+    var queueOrderRandom: Float
+        get() = pluginSettings.queueOrderRandom
+        set(value) {
+            pluginSettings.queueOrderRandom = value
+        }
+
+    /** Load all stored relations touching [valueId] as (otherId -> relation). */
+    suspend fun relationsForValue(valueId: Long): Map<Long, Float> =
+        zoneAxisRepository.relationsForValue(valueId)
 
     /** Delete a value (un-assigns it from all songs). */
     fun deleteValue(id: Long) {

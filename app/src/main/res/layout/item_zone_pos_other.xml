@@ -3,35 +3,41 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:gravity="center_vertical"
-    android:orientation="horizontal"
+    android:orientation="vertical"
     android:paddingHorizontal="@dimen/spacing_medium"
     android:paddingVertical="@dimen/spacing_small">
 
-    <TextView
-        android:id="@+id/zone_pos_other_label"
-        android:layout_width="0dp"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:ellipsize="end"
-        android:maxLines="1"
-        android:textAppearance="@style/TextAppearance.Auxio.BodyLarge"
-        tools:text="Sad" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
-    <TextView
-        android:id="@+id/zone_pos_other_position"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginEnd="@dimen/spacing_medium"
-        android:textAppearance="@style/TextAppearance.Auxio.LabelMedium"
-        android:textColor="?android:attr/textColorSecondary"
-        tools:text="-0.90" />
+        <TextView
+            android:id="@+id/zone_pos_other_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textAppearance="@style/TextAppearance.Auxio.BodyLarge"
+            tools:text="Sad" />
 
-    <TextView
-        android:id="@+id/zone_pos_other_gap"
-        android:layout_width="wrap_content"
+        <TextView
+            android:id="@+id/zone_pos_other_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
+            tools:text="-0.90" />
+
+    </LinearLayout>
+
+    <com.google.android.material.slider.Slider
+        android:id="@+id/zone_pos_other_slider"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
-        tools:text="gap 1.20" />
+        android:valueFrom="-1.0"
+        android:valueTo="1.0"
+        android:stepSize="0.05" />
 
 </LinearLayout>
