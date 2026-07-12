@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    android:layout_width="280dp"
+    android:id="@+id/queue_order_root"
+    android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="?attr/colorSurfaceContainerHigh"
     android:orientation="vertical"
@@ -16,47 +17,136 @@
         android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
         android:textColor="?attr/colorPrimary" />
 
-    <TextView
+    <!-- Similarity -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/lbl_queue_order_similarity"
-        android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
+        android:orientation="horizontal">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/lbl_queue_order_similarity"
+            android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
+        <TextView
+            android:id="@+id/queue_order_similarity_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.Auxio.LabelMedium"
+            android:textColor="?android:attr/textColorSecondary"
+            tools:text="+1.00" />
+    </LinearLayout>
 
-    <com.google.android.material.slider.Slider
-        android:id="@+id/queue_order_similarity"
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:stepSize="0.05"
-        android:valueFrom="-1.0"
-        android:valueTo="1.0" />
+        android:layout_height="wrap_content">
+        <View
+            android:layout_width="1dp"
+            android:layout_height="12dp"
+            android:layout_gravity="center"
+            android:background="?attr/colorOutline" />
+        <com.google.android.material.slider.Slider
+            android:id="@+id/queue_order_similarity"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:stepSize="0.05"
+            android:valueFrom="-1.0"
+            android:valueTo="1.0" />
+    </FrameLayout>
 
-    <TextView
+    <!-- Frequency -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/lbl_queue_order_frequency"
-        android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
+        android:orientation="horizontal">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/lbl_queue_order_frequency"
+            android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
+        <TextView
+            android:id="@+id/queue_order_frequency_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.Auxio.LabelMedium"
+            android:textColor="?android:attr/textColorSecondary"
+            tools:text="0.00" />
+    </LinearLayout>
 
-    <com.google.android.material.slider.Slider
-        android:id="@+id/queue_order_frequency"
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:stepSize="0.05"
-        android:valueFrom="-1.0"
-        android:valueTo="1.0" />
+        android:layout_height="wrap_content">
+        <View
+            android:layout_width="1dp"
+            android:layout_height="12dp"
+            android:layout_gravity="center"
+            android:background="?attr/colorOutline" />
+        <com.google.android.material.slider.Slider
+            android:id="@+id/queue_order_frequency"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:stepSize="0.05"
+            android:valueFrom="-1.0"
+            android:valueTo="1.0" />
+    </FrameLayout>
 
-    <TextView
+    <!-- Random -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/lbl_queue_order_random"
-        android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
+        android:orientation="horizontal">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/lbl_queue_order_random"
+            android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
+        <TextView
+            android:id="@+id/queue_order_random_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.Auxio.LabelMedium"
+            android:textColor="?android:attr/textColorSecondary"
+            tools:text="0.00" />
+    </LinearLayout>
 
-    <com.google.android.material.slider.Slider
-        android:id="@+id/queue_order_random"
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <View
+            android:layout_width="1dp"
+            android:layout_height="12dp"
+            android:layout_gravity="center"
+            android:background="?attr/colorOutline" />
+        <com.google.android.material.slider.Slider
+            android:id="@+id/queue_order_random"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:stepSize="0.05"
+            android:valueFrom="-1.0"
+            android:valueTo="1.0"
+            tools:ignore="SpeakableTextPresentCheck" />
+    </FrameLayout>
+
+    <!-- Actions -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:stepSize="0.05"
-        android:valueFrom="-1.0"
-        android:valueTo="1.0"
-        tools:ignore="SpeakableTextPresentCheck" />
+        android:gravity="end"
+        android:orientation="horizontal"
+        android:paddingTop="@dimen/spacing_small">
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/queue_order_reset"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/lbl_queue_order_reset" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/queue_order_apply"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/lbl_queue_order_apply" />
+    </LinearLayout>
 
 </LinearLayout>

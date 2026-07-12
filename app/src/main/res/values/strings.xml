@@ -132,6 +132,8 @@
     <string name="lbl_queue_order_similarity">Similarity (−least / +most similar)</string>
     <string name="lbl_queue_order_frequency">Frequency (−least / +most played)</string>
     <string name="lbl_queue_order_random">Random (−fixed / +shuffled)</string>
+    <string name="lbl_queue_order_apply">Apply</string>
+    <string name="lbl_queue_order_reset">Reset</string>
     <string name="lbl_zone_pos_header">Position on this axis</string>
     <string name="lbl_zone_pos_hint">Move toward −1 or +1 to set how opposite this value is from others on the same axis. Values close together are treated as similar; far apart as opposite.</string>
     <string name="lbl_zone_pos_others">Other values on this axis</string>

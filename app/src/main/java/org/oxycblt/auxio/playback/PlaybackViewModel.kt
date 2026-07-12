@@ -610,6 +610,18 @@ constructor(
     }
 
     /**
+     * Re-apply the current shuffle order so a Zone Axis queue-order change takes
+     * effect on the remaining queue. No-op when not shuffled (the chain order
+     * only applies to shuffled playback).
+     */
+    fun reapplyChainOrder() {
+        if (playbackManager.isShuffled) {
+            L.d("Re-applying chain order for queue-order change")
+            playbackManager.shuffled(true)
+        }
+    }
+
+    /**
      * Toggle [repeatMode] (ex. from [RepeatMode.NONE] to [RepeatMode.TRACK])
      *
      * @see RepeatMode.increment
