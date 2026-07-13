@@ -52,9 +52,11 @@ interface ChainRepository {
     suspend fun recordTransition(
         from: Song,
         to: Song,
-        listenedFraction: Float,
+        fromHeard: Float,
+        toHeard: Float,
         kind: String,
-        weight: Float
+        weight: Float,
+        applyZone: Boolean
     )
 
     /** Fold a standalone play observation into [song]'s quality score. */
@@ -160,13 +162,20 @@ constructor(
     override suspend fun recordTransition(
         from: Song,
         to: Song,
-        listenedFraction: Float,
+        fromHeard: Float,
+        toHeard: Float,
         kind: String,
-        weight: Float
+        weight: Float,
+        applyZone: Boolean
     ) {
         val fromKey = keyOf(from) ?: return
         val toKey = keyOf(to) ?: return
         if (fromKey == toKey) return
+
+        // The destination's heard fraction is the "was this a good follow" signal
+        // that drives attract/repel; the source's heard is carried for logging
+        // and (via the caller's weight) magnitude.
+        val listenedFraction = toHeard
 
         val now = System.currentTimeMillis()
 
@@ -180,35 +189,29 @@ constructor(
         if (pull > 0 && kind == "Select") pull *= SELECT_ATTRACT_MULTIPLIER
 
         // Zone-space blend (additive, penalty-only): subtract the normalized
-        // 0..1 zone-distance, scaled by ZONE_LEARN_WEIGHT (firm = ~1, roughly
-        // equal to a typical listening pull). This can flip a clean listen to
-        // net repulsion when two songs are tagged far apart, and actively drives
-        // opposite-tagged songs apart even without a skip — but it never ADDS
-        // attraction (blank axes sit at 0, so a bonus there would pull the whole
-        // untagged library together, re-creating cross-zone contamination).
-        // Zone blend (relative-lookup): look up the stored pairwise relative
-        // value between the two songs' tags on each axis (Language, Type),
-        // -1..+1, unset = 0 (neutral). The more extreme axis dominates (a strong
-        // opposition on EITHER axis should be felt), and the signed relation is
-        // added to the pull: negative relations (opposite tags) subtract, driving
-        // repulsion even on a clean listen; positive relations reinforce. Blank
-        // tags contribute 0 — neither helping nor hurting.
-        val fromTag = zoneAxisRepository.tagForKey(fromKey)
-        val toTag = zoneAxisRepository.tagForKey(toKey)
-        val langRel =
-            zoneAxisRepository.relationBetween(fromTag?.languageValueId, toTag?.languageValueId)
-        val typeRel =
-            zoneAxisRepository.relationBetween(fromTag?.typeValueId, toTag?.typeValueId)
-        // Most-extreme-wins: pick the relation with the largest magnitude.
-        val zoneRel = if (kotlin.math.abs(langRel) >= kotlin.math.abs(typeRel)) langRel else typeRel
-        pull += ZONE_LEARN_WEIGHT * zoneRel
+        // Zone + bias apply ONLY to "pass"/listened edges (real listened->listened
+        // links), never to skip edges — a skip is a pure rejection and must not be
+        // softened (or hardened) by mood agreement. When applyZone is false, zoneRel
+        // stays 0 and no bias is added.
+        var zoneRel = 0f
+        if (applyZone) {
+            val fromTag = zoneAxisRepository.tagForKey(fromKey)
+            val toTag = zoneAxisRepository.tagForKey(toKey)
+            val langRel =
+                zoneAxisRepository.relationBetween(fromTag?.languageValueId, toTag?.languageValueId)
+            val typeRel =
+                zoneAxisRepository.relationBetween(fromTag?.typeValueId, toTag?.typeValueId)
+            // Most-extreme-wins: pick the relation with the largest magnitude.
+            zoneRel = if (kotlin.math.abs(langRel) >= kotlin.math.abs(typeRel)) langRel else typeRel
+            pull += ZONE_LEARN_WEIGHT * zoneRel
 
-        // Bias nudge (per-user love/understand of the DESTINATION song's tags):
-        // transitioning into a loved/understood tag attracts a little more, into
-        // a hated/not-understood tag repels a little. Neutral (0) = no effect.
-        val toLangBias = zoneAxisRepository.biasOf(toTag?.languageValueId)
-        val toTypeBias = zoneAxisRepository.biasOf(toTag?.typeValueId)
-        pull += BIAS_LEARN_WEIGHT * (toLangBias + toTypeBias)
+            // Bias nudge (per-user love/understand of the DESTINATION song's tags):
+            // into a loved/understood tag attracts a little more, into a hated one
+            // repels a little. Neutral (0) = no effect.
+            val toLangBias = zoneAxisRepository.biasOf(toTag?.languageValueId)
+            val toTypeBias = zoneAxisRepository.biasOf(toTag?.typeValueId)
+            pull += BIAS_LEARN_WEIGHT * (toLangBias + toTypeBias)
+        }
 
         // Scale the entire learning magnitude by the caller's weight. A normal
         // edge uses 1.0; a pass-through (unlistened navigation skip) uses a tiny
@@ -223,16 +226,18 @@ constructor(
 
         applyPull(a, b, from, to, fromKey, toKey, pull, now, BASE_LEARNING_RATE)
 
-        val pct = (listenedFraction * 100).toInt()
+        val srcPct = (fromHeard * 100).toInt()
+        val destPct = (toHeard * 100).toInt()
         val simAfter = cosine(embeddingDao.get(fromKey)!!.vector, embeddingDao.get(toKey)!!.vector)
         val delta = simAfter - simBefore
         val keyKind = if (fromKey.startsWith("uid:")) " [uid]" else ""
         val zoneNote = if (zoneRel != 0f) " rel=${"%+.2f".format(zoneRel)}" else ""
-        // Two lines: the transition, then the learning detail indented beneath —
-        // heard %, resulting sim, and the signed delta from THIS transition.
+        // Two lines: the transition, then the learning detail beneath —
+        // heard [src : dest], resulting sim, and the signed delta.
         chainLog.log(
             "$kind: ${nameOf(from)} → ${nameOf(to)}$keyKind\n" +
-                "heard $pct%, sim ${"%.2f".format(simAfter)} (${"%+.3f".format(delta)})$zoneNote")
+                "heard [src $srcPct% : des $destPct%], sim ${"%.2f".format(simAfter)} " +
+                "(${"%+.3f".format(delta)})$zoneNote")
     }
 
     override suspend fun confirmPairing(a: Song, b: Song, similar: Boolean) {
