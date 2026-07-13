@@ -419,21 +419,6 @@ constructor(
         // consulted when enabled. Strength = plays/(plays+skips) with +1
         // shrinkage so a handful of plays isn't over-trusted. Cached per source
         // key as we encounter each current song during the walk.
-        val transitionEnabled = pluginSettings.transitionGraphEnabled
-        val transitionCache = HashMap<String, Map<String, Float>>()
-        suspend fun transitionsOf(sourceKey: String?): Map<String, Float> {
-            if (!transitionEnabled || sourceKey == null) return emptyMap()
-            return transitionCache.getOrPut(sourceKey) {
-                val out = HashMap<String, Float>()
-                for (e in transitionDao.outgoingFromNow(sourceKey)) {
-                    val total = e.plays + e.skips
-                    // Shrunk strength, only meaningfully positive with real plays.
-                    out[e.toKey] = if (total > 0) e.plays.toFloat() / (total + 1) else 0f
-                }
-                out
-            }
-        }
-
         val vectorOf = { i: Int ->
             val k = keys[i]
             when {
@@ -445,123 +430,104 @@ constructor(
         val tagOf = { i: Int -> keys[i]?.let { tagByKey[it] } }
         val freqOf = { i: Int -> keys[i]?.let { freqByKey[it] } ?: 0f }
 
-        // Within-ring order weights (the 3-slider blend). Magnitudes normalize
-        // into shares summing to 1; sign gives direction (see QueueOrderWeights).
-        val w = queueOrderWeights()
-        val magSum = (kotlin.math.abs(w.similarity) + kotlin.math.abs(w.frequency) +
-            kotlin.math.abs(w.random)).coerceAtLeast(1e-4f)
-        val simShare = kotlin.math.abs(w.similarity) / magSum
-        val simDir = if (w.similarity >= 0f) 1f else -1f
-        val freqShare = kotlin.math.abs(w.frequency) / magSum
-        val freqDir = if (w.frequency >= 0f) 1f else -1f
-        val randShare = kotlin.math.abs(w.random) / magSum
-
-        // Random dissolves intentional structure: similarity/frequency shares
-        // already shrink as randShare grows (shared-budget normalization above);
-        // fade the cross-ring BIAS pull directionally by Random's SIGN — a linear
-        // map where -1 = full bias, 0 = half, +1 = no bias. (Random's magnitude
-        // still drives within-ring shuffle via randShare above; here its sign
-        // additionally controls how much user bias shapes cross-ring order.)
-        val biasFade = ((1f - w.random) / 2f).coerceIn(0f, 1f)
-        val effectiveBiasWeight = BIAS_ORDER_WEIGHT * biasFade
-
+        // Output permutation; the start song is fixed at position 0.
         val used = BooleanArray(n)
         val order = IntArray(n)
         order[0] = start
         used[start] = true
-        var current = start
         var filled = 1
 
-        // Recently-played guard: avoid resurfacing a song heard in the last N
-        // picks unless nothing else is available (soft, not a hard rule).
+        // Recently-played guard: songs heard in the last N picks are pushed to the
+        // back of the eligible order (soft, not excluded).
         val recent = ArrayDeque<String>()
-        fun pushRecent(i: Int) {
-            keys[i]?.let {
-                recent.addLast(it)
-                while (recent.size > RECENT_WINDOW) recent.removeFirst()
-            }
+        keys[start]?.let { recent.addLast(it) }
+
+        // ================= 3-STAGE FILTER/SORT PIPELINE =================
+        // Replaces the old additive-score-with-magic-constants walk. The three
+        // sliders are applied as ordered LAYERS, broadest first: Random scopes
+        // WHICH tag-clusters are eligible, Frequency sorts survivors by play
+        // count, Similarity does the final fine-grained vector sort. Each stage
+        // operates strictly within what the previous stage admitted (3 -> 2 -> 1).
+        val w = queueOrderWeights()
+        val simV = w.similarity.coerceIn(-1f, 1f)
+        val freqV = w.frequency.coerceIn(-1f, 1f)
+        val randV = w.random.coerceIn(-1f, 1f)
+
+        val curTag0 = tagOf(start)
+        val curVec0 = vectorOf(start)
+
+        // ---- STAGE 3 (Random): scope which candidates are eligible. ----
+        // Random blends tag distance (relative value + bias) into the current
+        // tag. +1: fully open — opposite Type/Language and not-understood/hated
+        // tags all admitted. -1: closed — only tags at/above 0 relation in the
+        // positive direction (never opposite mood/language). 0: same-Type family.
+        // We compute a per-candidate "tag openness need" and admit it if Random
+        // is open enough.
+        fun tagBlend(i: Int): Float {
+            val iTag = tagOf(i)
+            val typeRel = rel(curTag0?.typeValueId, iTag?.typeValueId)
+            val langRel = rel(curTag0?.languageValueId, iTag?.languageValueId)
+            // Most-negative axis dominates "how far/opposite" this tag is.
+            val worst = minOf(typeRel, langRel)
+            // Bias (love/understand) nudges openness: loved/understood tags feel
+            // "closer" and are admitted at tighter Random settings.
+            val b = bias(iTag?.typeValueId) + bias(iTag?.languageValueId)
+            return worst + BIAS_BLEND_NUDGE * b
         }
-        pushRecent(start)
+        // Admission threshold slides with Random: randV=+1 admits everything
+        // (threshold -1), randV=-1 admits only strongly-positive tags
+        // (threshold ~ +1 * ADMIT_TIGHTNESS), randV=0 admits >= 0 (same/positive).
+        val admitThreshold = -randV
+        val eligible = ArrayList<Int>(n)
+        for (i in 0 until n) {
+            if (used[i]) continue
+            // Always admit exact same-tag songs regardless of Random.
+            if (tagBlend(i) >= admitThreshold) eligible.add(i)
+        }
+        // Never strand the queue: if scoping admitted nothing, admit all.
+        if (eligible.isEmpty()) for (i in 0 until n) if (!used[i]) eligible.add(i)
 
-        for (pos in 1 until n) {
-            val curTag = tagOf(current)
-            val cur = vectorOf(current)
-            // Proven transitions FROM the current song (empty if disabled).
-            val curTransitions = transitionsOf(keys[current])
-            // The Similarity slider gates how much a proven transition may bypass
-            // the ring cascade: low similarity share = rigid cascade (little
-            // bypass), high = strong habits override mood structure. Positive
-            // direction only (a "least similar first" setting shouldn't grant
-            // bypass power). 0..1.
-            val bypassGate = (simShare * simDir).coerceIn(0f, 1f)
+        // ---- STAGE 2 (Frequency): sort survivors by play count. ----
+        // +freq: most-played first; -freq: least-played first; 0: no ordering
+        // effect (stable, deferring to Stage 1). Applied as the primary sort key
+        // scaled by |freq| so at 0 it contributes nothing.
+        // ---- STAGE 1 (Similarity): final fine-grained vector sort. ----
+        // +sim: closest vector to current first; -sim: farthest first; 0: no
+        // vector ordering (all same-scope songs equal, deferring to Stage 2).
+        // Similarity is the FINEST key, so it's applied as the tie-breaker WITHIN
+        // equal-frequency groups — but because both are continuous we combine
+        // them as a weighted sort key with Similarity dominating when |sim|>|freq|.
+        fun simTo(i: Int): Float {
+            val v = vectorOf(i)
+            return if (v == null || curVec0 == null) 0f else cosine(curVec0, v)
+        }
+        val eligibleSorted =
+            eligible.sortedWith(
+                compareByDescending<Int> {
+                    // Stage 1 (finest): similarity sort, signed. Weight |sim|.
+                    val s = simTo(it) * (if (simV >= 0) 1f else -1f) * kotlin.math.abs(simV)
+                    // Stage 2: frequency sort, signed. Weight |freq|, kept below
+                    // similarity so Stage 1 dominates when both are set.
+                    val f = freqOf(it) * (if (freqV >= 0) 1f else -1f) * kotlin.math.abs(freqV) * STAGE2_WEIGHT
+                    s + f
+                })
 
-            var bestI = -1
-            var bestScore = -Float.MAX_VALUE
-            var bestNonRecentI = -1
-            var bestNonRecentScore = -Float.MAX_VALUE
-            for (i in 0 until n) {
-                if (used[i]) continue
-                val v = vectorOf(i)
-                val sim = if (v == null || cur == null) -1f else cosine(cur, v)
-                val iTag = tagOf(i)
-                // Ring priority: Type first (mood), then Language, most-extreme
-                // relation wins; positive attracts, negative pushes to the tail.
-                val typeRel = rel(curTag?.typeValueId, iTag?.typeValueId)
-                val langRel = rel(curTag?.languageValueId, iTag?.languageValueId)
-                // Type weighted heavier than Language so mood leads the cascade.
-                val ringScore = RING_TYPE_WEIGHT * typeRel + RING_LANG_WEIGHT * langRel
-
-                // Proven transition strength from current -> candidate (0 if none
-                // or disabled). Real play history only — cold-start similarity
-                // never grants this.
-                val transStrength = keys[i]?.let { curTransitions[it] } ?: 0f
-
-                // Within-ring blend: similarity + frequency (signed) + random,
-                // plus proven transition strength (orders WITHIN a ring by real
-                // habit). Kept below the ring term so it only sorts within a ring.
-                val within =
-                    simShare * simDir * sim +
-                        freqShare * freqDir * freqOf(i) +
-                        randShare * (Random.nextFloat() * 2f - 1f) +
-                        TRANSITION_ORDER_WEIGHT * transStrength
-
-                // Bias (per-user love/understand of the candidate's own tags).
-                // Added at ring scale so a strongly-loved-but-far tag can surface
-                // earlier than a closer-but-disliked one (combines across rings).
-                // Faded by Random (effectiveBiasWeight): more random = less bias.
-                // Sum of Language-understand + Type-love; neutral (0) = no effect.
-                val biasTerm = effectiveBiasWeight * (bias(iTag?.languageValueId) + bias(iTag?.typeValueId))
-
-                // Ring BYPASS: a strong PROVEN transition can jump the candidate
-                // ahead of its ring, scaled by the Similarity gate. At full gate a
-                // strong habit is worth ~one ring step; at zero gate the cascade
-                // stays rigid. Only real transition evidence contributes.
-                val bypass = RING_SCALE * bypassGate * transStrength
-
-                val score = RING_SCALE * ringScore + biasTerm + within + bypass
-                if (score > bestScore) {
-                    bestScore = score
-                    bestI = i
-                }
-                val isRecent = keys[i] in recent
-                if (!isRecent && score > bestNonRecentScore) {
-                    bestNonRecentScore = score
-                    bestNonRecentI = i
-                }
-            }
-            if (bestI < 0) break
-            // Prefer the best non-recent candidate; fall back to best overall
-            // only if everything left was recently played.
-            val next = if (bestNonRecentI >= 0) bestNonRecentI else bestI
-            order[pos] = next
-            used[next] = true
-            current = next
-            pushRecent(next)
-            filled++
+        // Emit, honoring the recently-played guard as a soft de-prioritizer.
+        val nonRecent = eligibleSorted.filter { keys[it] !in recent }
+        val recentOnes = eligibleSorted.filter { keys[it] in recent }
+        for (i in nonRecent) {
+            order[filled++] = i
+            used[i] = true
+        }
+        for (i in recentOnes) {
+            order[filled++] = i
+            used[i] = true
         }
 
-        // Append any leftovers at the tail so the result stays a full
-        // permutation (required by BetterShuffleOrder).
+        // Append any leftovers (songs Stage 3 never admitted) at the tail so the
+        // result stays a full permutation (required by BetterShuffleOrder). With
+        // Loop off + max Similarity this tail is where playback naturally ends;
+        // with Loop on the queue cycles back through it.
         if (filled < n) {
             for (i in 0 until n) if (!used[i]) {
                 order[filled++] = i
@@ -660,6 +626,13 @@ constructor(
         // listen threshold (SKIP_THRESHOLD) so a song counted as "listened" by
         // the chain is also counted as a play here (was 0.5, too strict).
         const val TRANSITION_PLAY_THRESHOLD = 0.25f
+
+        // Pipeline tuning. BIAS_BLEND_NUDGE: how much per-tag love/understand
+        // loosens the Random admission gate for that tag. STAGE2_WEIGHT: keeps
+        // the frequency sort below the similarity sort so Similarity (finest
+        // stage) dominates when both sliders are set.
+        const val BIAS_BLEND_NUDGE = 0.3f
+        const val STAGE2_WEIGHT = 0.5f
 
         // Within-ring ordering weight for proven transition strength. On the same
         // scale as the other within-ring signals (well below RING_SCALE) so it
