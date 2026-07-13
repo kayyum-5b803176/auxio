@@ -217,14 +217,22 @@ constructor(
         // to another would corrupt otherwise-correct links.
         pull *= weight
 
+        // Cosine BEFORE the pull, so we can report the signed change this single
+        // transition caused (+ pushed the pair together, - pushed them apart).
+        val simBefore = cosine(embeddingDao.get(fromKey)!!.vector, embeddingDao.get(toKey)!!.vector)
+
         applyPull(a, b, from, to, fromKey, toKey, pull, now, BASE_LEARNING_RATE)
 
         val pct = (listenedFraction * 100).toInt()
-        val sim = cosine(embeddingDao.get(fromKey)!!.vector, embeddingDao.get(toKey)!!.vector)
+        val simAfter = cosine(embeddingDao.get(fromKey)!!.vector, embeddingDao.get(toKey)!!.vector)
+        val delta = simAfter - simBefore
         val keyKind = if (fromKey.startsWith("uid:")) " [uid]" else ""
         val zoneNote = if (zoneRel != 0f) " rel=${"%+.2f".format(zoneRel)}" else ""
+        // Two lines: the transition, then the learning detail indented beneath —
+        // heard %, resulting sim, and the signed delta from THIS transition.
         chainLog.log(
-            "$kind: ${nameOf(from)} → ${nameOf(to)} (heard $pct%, sim now ${"%.2f".format(sim)}$zoneNote)$keyKind")
+            "$kind: ${nameOf(from)} → ${nameOf(to)}$keyKind\n" +
+                "   heard $pct%, sim ${"%.2f".format(simAfter)} (${"%+.3f".format(delta)})$zoneNote")
     }
 
     override suspend fun confirmPairing(a: Song, b: Song, similar: Boolean) {
