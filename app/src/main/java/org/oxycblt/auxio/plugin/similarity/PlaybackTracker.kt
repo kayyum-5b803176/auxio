@@ -262,32 +262,48 @@ constructor(
                     // Forward move (manual skip, natural advance, or a user
                     // song selection).
                     //
-                    // Bug-2 fix: finalize the PENDING edge (pendingFrom ->
-                    // previous) now, using `previous`'s own heard fraction — this
-                    // is the correct measure of "was `previous` a good follow of
-                    // pendingFrom". This is the edge that was opened when we
-                    // started playing `previous`.
+                    // Engagement decides how this skip is treated:
+                    //  - previous was LISTENED (heard >= SKIP_HEARD): it is a real
+                    //    node in the chain. Finalize the pending edge into it at
+                    //    full strength, and it becomes the new anchor (pendingFrom)
+                    //    so the NEXT listened song links back to THIS one.
+                    //  - previous was a PASS-THROUGH (heard < SKIP_HEARD): the user
+                    //    was navigating past it, not judging it against its
+                    //    neighbours. It must NOT anchor a link (so A->D forms across
+                    //    it) and the pending edge into it is NOT finalized as a real
+                    //    skip. Instead it gets a tiny, linearly-ramped repel that
+                    //    only accumulates under persistent repetition.
+                    val listened = previousHeard >= SKIP_HEARD
                     val from = pendingFrom
-                    if (from != null && from != previous) {
-                        val kind =
-                            when {
-                                previousHeard < SKIP_HEARD -> "Skip"
-                                // The finished song had been deliberately chosen
-                                // by the user AND was actually listened to — the
-                                // strongest positive follow signal.
-                                currentWasSelected -> "Select"
-                                else -> "Play"
+                    if (listened) {
+                        if (from != null && from != previous) {
+                            val kind = if (currentWasSelected) "Select" else "Play"
+                            recordEdgeAsync(from, previous, previousHeard, kind, 1f)
+                        }
+                        // Listened song updates its own node score and becomes the
+                        // new anchor for the next listened->listened link.
+                        recordPlayAsync(previous, previousHeard)
+                        pendingFrom = previous
+                        currentWasSelected = intent == Intent.SELECT
+                    } else {
+                        // Pass-through: tiny ramped repel on the edge into it, but
+                        // it does NOT become the anchor — pendingFrom is preserved
+                        // so a later listened song links back across this skip
+                        // (A -> D across skipped B, C). Weight ramps 0 (instant
+                        // reflex, pure navigation) up to PASSTHROUGH_MAX_WEIGHT at
+                        // the listen threshold, removing the hard cliff.
+                        if (from != null && from != previous) {
+                            val ramp = (previousHeard / SKIP_HEARD).coerceIn(0f, 1f)
+                            val weight = PASSTHROUGH_MAX_WEIGHT * ramp
+                            if (weight > 0f) {
+                                recordEdgeAsync(from, previous, previousHeard, "Pass", weight)
                             }
-                        recordEdgeAsync(from, previous, previousHeard, kind)
+                        }
+                        // Node score still reflects that it was (barely) heard, but
+                        // the anchor and currentWasSelected are intentionally NOT
+                        // updated — the pass-through is transparent to the chain.
+                        recordPlayAsync(previous, previousHeard)
                     }
-                    // Also update `previous`'s own node score by how much of it
-                    // was heard (independent of context).
-                    recordPlayAsync(previous, previousHeard)
-
-                    // Open the next pending edge: previous -> newSong, to be
-                    // finalized when newSong ends and we know its heard fraction.
-                    pendingFrom = previous
-                    currentWasSelected = intent == Intent.SELECT
                 }
             }
         } else {
@@ -306,11 +322,11 @@ constructor(
             if (playbackManager.progression.isPlaying) System.currentTimeMillis() else -1L
     }
 
-    private fun recordEdgeAsync(from: Song, to: Song, fraction: Float, kind: String) {
-        L.d("SmartChain: recordEdge $kind ${from.path.name} -> ${to.path.name} frac=$fraction")
+    private fun recordEdgeAsync(from: Song, to: Song, fraction: Float, kind: String, weight: Float) {
+        L.d("SmartChain: recordEdge $kind ${from.path.name} -> ${to.path.name} frac=$fraction w=$weight")
         scope.launch {
             try {
-                chainRepository.recordTransition(from, to, fraction, kind)
+                chainRepository.recordTransition(from, to, fraction, kind, weight)
             } catch (e: Exception) {
                 L.e("SmartChain: recordTransition FAILED: $e")
             }
@@ -363,5 +379,12 @@ constructor(
         // least this much of the song being abandoned had played first — so an
         // instant reflex prev-tap doesn't register as a like.
         const val JUMP_BACK_MIN_HEARD = 0.15f
+
+        // Ceiling for a pass-through (sub-threshold, unlistened) skip's repel,
+        // as a fraction of a real listened-then-skip. The actual weight ramps
+        // linearly from 0 (instant reflex skip = pure navigation) up to this at
+        // the listen threshold, so ~100 average pass-throughs ≈ one real skip
+        // and there's no hard cliff at the threshold boundary. Tuning knob.
+        const val PASSTHROUGH_MAX_WEIGHT = 0.01f
     }
 }

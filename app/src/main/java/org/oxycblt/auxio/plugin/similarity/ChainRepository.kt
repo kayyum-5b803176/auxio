@@ -49,7 +49,13 @@ interface ChainRepository {
      * an early skip pushes them apart. [kind] tags the source (Play/Skip/Select)
      * for weighting and the log.
      */
-    suspend fun recordTransition(from: Song, to: Song, listenedFraction: Float, kind: String)
+    suspend fun recordTransition(
+        from: Song,
+        to: Song,
+        listenedFraction: Float,
+        kind: String,
+        weight: Float
+    )
 
     /** Fold a standalone play observation into [song]'s quality score. */
     suspend fun recordSongPlay(song: Song, listenedFraction: Float)
@@ -155,7 +161,8 @@ constructor(
         from: Song,
         to: Song,
         listenedFraction: Float,
-        kind: String
+        kind: String,
+        weight: Float
     ) {
         val fromKey = keyOf(from) ?: return
         val toKey = keyOf(to) ?: return
@@ -202,6 +209,13 @@ constructor(
         val toLangBias = zoneAxisRepository.biasOf(toTag?.languageValueId)
         val toTypeBias = zoneAxisRepository.biasOf(toTag?.typeValueId)
         pull += BIAS_LEARN_WEIGHT * (toLangBias + toTypeBias)
+
+        // Scale the entire learning magnitude by the caller's weight. A normal
+        // edge uses 1.0; a pass-through (unlistened navigation skip) uses a tiny
+        // ramped fraction so it barely moves the pair and only accumulates under
+        // persistent repetition — without this, skipping past a song on the way
+        // to another would corrupt otherwise-correct links.
+        pull *= weight
 
         applyPull(a, b, from, to, fromKey, toKey, pull, now, BASE_LEARNING_RATE)
 
