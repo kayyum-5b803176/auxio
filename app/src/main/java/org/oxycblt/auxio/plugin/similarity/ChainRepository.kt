@@ -259,7 +259,7 @@ constructor(
         if (applyZone && pluginSettings.transitionGraphEnabled) {
             val isPlay = toHeard >= TRANSITION_PLAY_THRESHOLD
             transitionDao.upsertDelta(
-                fromKey, toKey,
+                fromKey, toKey, nameOf(to),
                 plays = if (isPlay) 1 else 0,
                 skips = if (isPlay) 0 else 1,
                 now = now)
@@ -591,23 +591,11 @@ constructor(
         // the music library; fingerprint keys fall back to a short key label.
         val rows =
             edges.map { e ->
-                val name = resolveKeyName(e.toKey)
                 val total = e.plays + e.skips
                 val strength = if (total > 0) e.plays.toFloat() / total else 0f
-                TransitionRow(name, e.plays, e.skips, strength)
+                TransitionRow(e.toName, e.plays, e.skips, strength)
             }
         return rows.sortedByDescending { it.strength }
-    }
-
-    private fun resolveKeyName(key: String): String {
-        if (key.startsWith("uid:")) {
-            val uidStr = key.removePrefix("uid:")
-            val uid = org.oxycblt.musikr.Music.UID.fromString(uidStr)
-            val song = uid?.let { musicRepository.library?.findSong(it) }
-            if (song != null) return nameOf(song)
-        }
-        // Fingerprint or unresolvable: show a short, stable label.
-        return key.take(16) + "…"
     }
 
 
@@ -668,10 +656,10 @@ constructor(
         const val BIAS_LEARN_WEIGHT = 0.3f
         const val BIAS_ORDER_WEIGHT = 5.0f
 
-        // Transition graph's OWN play/skip threshold (independent of SKIP_THRESHOLD
-        // and the tracker's SKIP_HEARD), tunable separately: a destination heard
-        // at least this fraction counts the A->B edge as a play, else a skip.
-        const val TRANSITION_PLAY_THRESHOLD = 0.5f
+        // Transition graph's play/skip threshold, matched to the smart-chain
+        // listen threshold (SKIP_THRESHOLD) so a song counted as "listened" by
+        // the chain is also counted as a play here (was 0.5, too strict).
+        const val TRANSITION_PLAY_THRESHOLD = 0.25f
 
         // Within-ring ordering weight for proven transition strength. On the same
         // scale as the other within-ring signals (well below RING_SCALE) so it

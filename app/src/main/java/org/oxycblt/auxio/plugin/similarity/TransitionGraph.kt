@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.Flow
 data class TransitionEdge(
     val fromKey: String,
     val toKey: String,
+    val toName: String,
     val plays: Int,
     val skips: Int,
     val updatedAtMs: Long
@@ -45,11 +46,18 @@ interface TransitionDao {
     suspend fun edge(from: String, to: String): TransitionEdge?
 
     @Query(
-        "INSERT INTO TransitionEdge (fromKey, toKey, plays, skips, updatedAtMs) " +
-            "VALUES (:from, :to, :plays, :skips, :now) " +
+        "INSERT INTO TransitionEdge (fromKey, toKey, toName, plays, skips, updatedAtMs) " +
+            "VALUES (:from, :to, :toName, :plays, :skips, :now) " +
             "ON CONFLICT(fromKey, toKey) DO UPDATE SET " +
-            "plays = plays + :plays, skips = skips + :skips, updatedAtMs = :now")
-    suspend fun upsertDelta(from: String, to: String, plays: Int, skips: Int, now: Long)
+            "plays = plays + :plays, skips = skips + :skips, toName = :toName, updatedAtMs = :now")
+    suspend fun upsertDelta(
+        from: String,
+        to: String,
+        toName: String,
+        plays: Int,
+        skips: Int,
+        now: Long
+    )
 
     /** All outgoing edges from [from], strongest-first, as a live flow (for the log). */
     @Query(

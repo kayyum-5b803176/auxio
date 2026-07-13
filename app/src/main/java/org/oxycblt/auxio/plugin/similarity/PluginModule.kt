@@ -55,6 +55,7 @@ val MIGRATION_6_7 =
                 "CREATE TABLE IF NOT EXISTS `TransitionEdge` (" +
                     "`fromKey` TEXT NOT NULL, " +
                     "`toKey` TEXT NOT NULL, " +
+                    "`toName` TEXT NOT NULL, " +
                     "`plays` INTEGER NOT NULL, " +
                     "`skips` INTEGER NOT NULL, " +
                     "`updatedAtMs` INTEGER NOT NULL, " +
