@@ -26,6 +26,12 @@
         app:summary="@string/set_zone_axis_desc"
         app:title="@string/set_zone_axis" />
 
+    <SwitchPreferenceCompat
+        app:defaultValue="false"
+        app:key="@string/set_key_transition_graph"
+        app:summary="@string/set_transition_graph_desc"
+        app:title="@string/set_transition_graph" />
+
     <org.oxycblt.auxio.settings.ui.WrappedDialogPreference
         app:key="@string/set_key_zone_axis_manage"
         app:summary="@string/set_zone_axis_manage_desc"

@@ -47,6 +47,21 @@ val MIGRATION_5_6 =
         }
     }
 
+/** Chain DB v6 -> v7: adds the directed TransitionEdge graph table. Additive. */
+val MIGRATION_6_7 =
+    object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `TransitionEdge` (" +
+                    "`fromKey` TEXT NOT NULL, " +
+                    "`toKey` TEXT NOT NULL, " +
+                    "`plays` INTEGER NOT NULL, " +
+                    "`skips` INTEGER NOT NULL, " +
+                    "`updatedAtMs` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`fromKey`, `toKey`))")
+        }
+    }
+
 /**
  * Zone DB v1 -> v2: adds the `position` column to ZoneAxisValue (continuous
  * zone-space). Additive; defaults to 0 (neutral center) for all existing values.
@@ -123,7 +138,7 @@ class PluginRoomModule {
             // change to ChainDatabase must ship an explicit Migration(from, to)
             // via .addMigrations(...) — never a blanket destructive fallback for
             // upgrades, and never another filename change (that orphans data).
-            .addMigrations(MIGRATION_5_6)
+            .addMigrations(MIGRATION_5_6, MIGRATION_6_7)
             .fallbackToDestructiveMigrationOnDowngrade()
             .build()
 
@@ -134,6 +149,8 @@ class PluginRoomModule {
     @Provides fun qualityDao(database: ChainDatabase) = database.qualityDao()
 
     @Provides fun lineageDao(database: ChainDatabase) = database.lineageDao()
+
+    @Provides fun transitionDao(database: ChainDatabase) = database.transitionDao()
 
     @Singleton
     @Provides

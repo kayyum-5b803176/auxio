@@ -19,6 +19,9 @@
             android:id="@+id/smart_chain_log"
             app:destination="@id/chain_log_fragment" />
         <action
+            android:id="@+id/transition_log"
+            app:destination="@id/transition_log_fragment" />
+        <action
             android:id="@+id/sort_songs"
             app:destination="@+id/song_sort_dialog" />
         <action
@@ -220,6 +223,12 @@
         android:name="org.oxycblt.auxio.plugin.similarity.ChainLogFragment"
         android:label="chain_log_fragment"
         tools:layout="@layout/fragment_chain_log" />
+
+    <fragment
+        android:id="@+id/transition_log_fragment"
+        android:name="org.oxycblt.auxio.plugin.similarity.TransitionLogFragment"
+        android:label="transition_log_fragment"
+        tools:layout="@layout/fragment_transition_log" />
 
     <fragment
         android:id="@+id/album_detail_fragment"

@@ -214,6 +214,8 @@ class HomeFragment :
             zoneModel.enabled
         binding.homeNormalToolbar.menu.findItem(R.id.action_smart_chain_log)?.isVisible =
             pluginSettings.smartChainEnabled
+        binding.homeNormalToolbar.menu.findItem(R.id.action_transition_log)?.isVisible =
+            pluginSettings.transitionGraphEnabled
     }
 
     override fun onOffsetChanged(appBarLayout: AppBarLayout, verticalOffset: Int) {
@@ -257,6 +259,11 @@ class HomeFragment :
             R.id.action_smart_chain_log -> {
                 L.d("Navigating to smart chain log")
                 findNavController().navigateSafe(HomeFragmentDirections.smartChainLog())
+                true
+            }
+            R.id.action_transition_log -> {
+                L.d("Navigating to transition log")
+                findNavController().navigateSafe(HomeFragmentDirections.transitionLog())
                 true
             }
 

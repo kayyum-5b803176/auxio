@@ -64,6 +64,9 @@ interface PluginSettings : Settings<PluginSettings.Listener> {
      */
     val zoneAxisEnabled: Boolean
 
+    /** Whether the directed transition-graph learning + log + ordering is on. */
+    val transitionGraphEnabled: Boolean
+
     /** Queue-order sliders, -1f..+1f each (within-ring blend). Persisted. */
     var queueOrderSimilarity: Float
     var queueOrderFrequency: Float
@@ -80,7 +83,10 @@ interface PluginSettings : Settings<PluginSettings.Listener> {
         fun onSmartChainChanged() {}
 
         /** Called when [zoneAxisEnabled] changes. */
-        fun onZoneAxisChanged() {}
+        fun onZoneAxisChanged()
+
+        /** Called when [transitionGraphEnabled] changes. */
+        fun onTransitionGraphChanged() {}
     }
 }
 
@@ -120,6 +126,10 @@ class PluginSettingsImpl @Inject constructor(@ApplicationContext private val con
         get() =
             sharedPreferences.getBoolean(getString(R.string.set_key_zone_axis), false)
 
+    override val transitionGraphEnabled: Boolean
+        get() =
+            sharedPreferences.getBoolean(getString(R.string.set_key_transition_graph), false)
+
     override var queueOrderSimilarity: Float
         get() = sharedPreferences.getFloat(getString(R.string.set_key_queue_order_similarity), 1f)
         set(value) {
@@ -152,6 +162,7 @@ class PluginSettingsImpl @Inject constructor(@ApplicationContext private val con
                 listener.onPriorityFoldersChanged()
             getString(R.string.set_key_smart_chain) -> listener.onSmartChainChanged()
             getString(R.string.set_key_zone_axis) -> listener.onZoneAxisChanged()
+            getString(R.string.set_key_transition_graph) -> listener.onTransitionGraphChanged()
         }
     }
 }

@@ -84,7 +84,18 @@ interface ChainRepository {
 
     /** Clear all learned data. */
     suspend fun clear()
+
+    /** Display rows of outgoing transitions from [song], strongest-first, for the log. */
+    suspend fun transitionsForCurrent(song: Song): List<TransitionRow>
 }
+
+/** A display row for the transition log: destination name + counts + strength. */
+data class TransitionRow(
+    val toName: String,
+    val plays: Int,
+    val skips: Int,
+    val strength: Float
+)
 
 class ChainRepositoryImpl
 @Inject
@@ -94,6 +105,7 @@ constructor(
     private val fingerprintRepository: FingerprintRepository,
     private val musicRepository: org.oxycblt.auxio.music.MusicRepository,
     private val zoneAxisRepository: ZoneAxisRepository,
+    private val transitionDao: TransitionDao,
     private val pluginSettings: PluginSettings,
     private val chainLog: ChainLog
 ) : ChainRepository {
@@ -238,6 +250,20 @@ constructor(
             "$kind: ${nameOf(from)} → ${nameOf(to)}$keyKind\n" +
                 "heard [src $srcPct% : des $destPct%], sim ${"%.2f".format(simAfter)} " +
                 "(${"%+.3f".format(delta)})$zoneNote")
+
+        // Directed transition graph: count this as a real, proven A->B transition
+        // when enabled AND this is a genuine listened edge (applyZone marks
+        // Play/Select/Pass; skip edges never count as transition evidence). Play
+        // vs skip is decided by the destination's own heard fraction against the
+        // graph's independent threshold.
+        if (applyZone && pluginSettings.transitionGraphEnabled) {
+            val isPlay = toHeard >= TRANSITION_PLAY_THRESHOLD
+            transitionDao.upsertDelta(
+                fromKey, toKey,
+                plays = if (isPlay) 1 else 0,
+                skips = if (isPlay) 0 else 1,
+                now = now)
+        }
     }
 
     override suspend fun confirmPairing(a: Song, b: Song, similar: Boolean) {
@@ -389,6 +415,25 @@ constructor(
         val biases = zoneAxisRepository.biasByValue()
         fun bias(id: Long?): Float = id?.let { biases[it] } ?: 0f
 
+        // Directed transition graph: proven "played B after A" evidence. Only
+        // consulted when enabled. Strength = plays/(plays+skips) with +1
+        // shrinkage so a handful of plays isn't over-trusted. Cached per source
+        // key as we encounter each current song during the walk.
+        val transitionEnabled = pluginSettings.transitionGraphEnabled
+        val transitionCache = HashMap<String, Map<String, Float>>()
+        suspend fun transitionsOf(sourceKey: String?): Map<String, Float> {
+            if (!transitionEnabled || sourceKey == null) return emptyMap()
+            return transitionCache.getOrPut(sourceKey) {
+                val out = HashMap<String, Float>()
+                for (e in transitionDao.outgoingFromNow(sourceKey)) {
+                    val total = e.plays + e.skips
+                    // Shrunk strength, only meaningfully positive with real plays.
+                    out[e.toKey] = if (total > 0) e.plays.toFloat() / (total + 1) else 0f
+                }
+                out
+            }
+        }
+
         val vectorOf = { i: Int ->
             val k = keys[i]
             when {
@@ -441,13 +486,15 @@ constructor(
         for (pos in 1 until n) {
             val curTag = tagOf(current)
             val cur = vectorOf(current)
+            // Proven transitions FROM the current song (empty if disabled).
+            val curTransitions = transitionsOf(keys[current])
+            // The Similarity slider gates how much a proven transition may bypass
+            // the ring cascade: low similarity share = rigid cascade (little
+            // bypass), high = strong habits override mood structure. Positive
+            // direction only (a "least similar first" setting shouldn't grant
+            // bypass power). 0..1.
+            val bypassGate = (simShare * simDir).coerceIn(0f, 1f)
 
-            // Score every remaining candidate. The zone relation to the current
-            // song decides the RING (cascade priority): songs sharing tags rank
-            // highest; then nearest Language under same Type; then Type expands
-            // positive-first, negatives last. This is one continuous score that
-            // reproduces the staged cascade because relation magnitude dominates
-            // the within-ring blend.
             var bestI = -1
             var bestScore = -Float.MAX_VALUE
             var bestNonRecentI = -1
@@ -464,13 +511,19 @@ constructor(
                 // Type weighted heavier than Language so mood leads the cascade.
                 val ringScore = RING_TYPE_WEIGHT * typeRel + RING_LANG_WEIGHT * langRel
 
+                // Proven transition strength from current -> candidate (0 if none
+                // or disabled). Real play history only — cold-start similarity
+                // never grants this.
+                val transStrength = keys[i]?.let { curTransitions[it] } ?: 0f
+
                 // Within-ring blend: similarity + frequency (signed) + random,
-                // by normalized shares. Kept an order of magnitude below the ring
-                // term so it only sorts WITHIN a ring, never across rings.
+                // plus proven transition strength (orders WITHIN a ring by real
+                // habit). Kept below the ring term so it only sorts within a ring.
                 val within =
                     simShare * simDir * sim +
                         freqShare * freqDir * freqOf(i) +
-                        randShare * (Random.nextFloat() * 2f - 1f)
+                        randShare * (Random.nextFloat() * 2f - 1f) +
+                        TRANSITION_ORDER_WEIGHT * transStrength
 
                 // Bias (per-user love/understand of the candidate's own tags).
                 // Added at ring scale so a strongly-loved-but-far tag can surface
@@ -479,7 +532,13 @@ constructor(
                 // Sum of Language-understand + Type-love; neutral (0) = no effect.
                 val biasTerm = effectiveBiasWeight * (bias(iTag?.languageValueId) + bias(iTag?.typeValueId))
 
-                val score = RING_SCALE * ringScore + biasTerm + within
+                // Ring BYPASS: a strong PROVEN transition can jump the candidate
+                // ahead of its ring, scaled by the Similarity gate. At full gate a
+                // strong habit is worth ~one ring step; at zero gate the cascade
+                // stays rigid. Only real transition evidence contributes.
+                val bypass = RING_SCALE * bypassGate * transStrength
+
+                val score = RING_SCALE * ringScore + biasTerm + within + bypass
                 if (score > bestScore) {
                     bestScore = score
                     bestI = i
@@ -521,7 +580,36 @@ constructor(
     override suspend fun clear() {
         embeddingDao.nuke()
         qualityDao.nuke()
+        transitionDao.nuke()
     }
+
+    override suspend fun transitionsForCurrent(song: Song): List<TransitionRow> {
+        val fromKey = keyOf(song) ?: return emptyList()
+        val edges = transitionDao.outgoingFromNow(fromKey)
+        if (edges.isEmpty()) return emptyList()
+        // Resolve each destination key to a display name. uid: keys resolve via
+        // the music library; fingerprint keys fall back to a short key label.
+        val rows =
+            edges.map { e ->
+                val name = resolveKeyName(e.toKey)
+                val total = e.plays + e.skips
+                val strength = if (total > 0) e.plays.toFloat() / total else 0f
+                TransitionRow(name, e.plays, e.skips, strength)
+            }
+        return rows.sortedByDescending { it.strength }
+    }
+
+    private fun resolveKeyName(key: String): String {
+        if (key.startsWith("uid:")) {
+            val uidStr = key.removePrefix("uid:")
+            val uid = org.oxycblt.musikr.Music.UID.fromString(uidStr)
+            val song = uid?.let { musicRepository.library?.findSong(it) }
+            if (song != null) return nameOf(song)
+        }
+        // Fingerprint or unresolvable: show a short, stable label.
+        return key.take(16) + "…"
+    }
+
 
     // ---- vector math -----------------------------------------------------
 
@@ -579,6 +667,17 @@ constructor(
         // neutral 0 bias contributes nothing. Tuning knobs; structure is fixed.
         const val BIAS_LEARN_WEIGHT = 0.3f
         const val BIAS_ORDER_WEIGHT = 5.0f
+
+        // Transition graph's OWN play/skip threshold (independent of SKIP_THRESHOLD
+        // and the tracker's SKIP_HEARD), tunable separately: a destination heard
+        // at least this fraction counts the A->B edge as a play, else a skip.
+        const val TRANSITION_PLAY_THRESHOLD = 0.5f
+
+        // Within-ring ordering weight for proven transition strength. On the same
+        // scale as the other within-ring signals (well below RING_SCALE) so it
+        // orders WITHIN a ring; the separate bypass term (RING_SCALE * gate *
+        // strength) is what lets a strong habit jump rings.
+        const val TRANSITION_ORDER_WEIGHT = 0.5f
 
         // Recently-played guard: don't resurface a song heard within this many
         // picks unless nothing else remains.

@@ -128,6 +128,12 @@
     <string name="lbl_zone_frequency">Frequency</string>
     <string name="lbl_zone_filter_clear">Clear all filters</string>
     <string name="lbl_zone_rename">Rename</string>
+    <string name="set_transition_graph">Transition graph</string>
+    <string name="set_transition_graph_desc">Learn which song you tend to play after each song, and use it to order the queue. Adds a per-song transition log to the overview menu.</string>
+    <string name="lbl_transition_log">Transition graph log</string>
+    <string name="lbl_transition_empty">No transitions recorded from the current song yet.</string>
+    <string name="lbl_transition_none_playing">Nothing is playing.</string>
+    <string name="fmt_transition_row">%1$s plays · %2$s skips</string>
     <string name="lbl_zone_bias_understand">How well do you understand %1$s?</string>
     <string name="lbl_zone_bias_love">How much do you love %1$s?</string>
     <string name="lbl_queue_order_title">Queue order</string>

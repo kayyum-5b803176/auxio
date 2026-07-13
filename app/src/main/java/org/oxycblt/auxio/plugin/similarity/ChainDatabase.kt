@@ -48,8 +48,9 @@ import kotlinx.coroutines.flow.Flow
  */
 @Database(
     entities =
-        [SongEmbedding::class, SongQuality::class, ChainLogEntry::class, SongLineage::class],
-    version = 6,
+        [SongEmbedding::class, SongQuality::class, ChainLogEntry::class, SongLineage::class,
+            TransitionEdge::class],
+    version = 7,
     exportSchema = false)
 @TypeConverters(VectorConverter::class)
 abstract class ChainDatabase : RoomDatabase() {
@@ -60,6 +61,8 @@ abstract class ChainDatabase : RoomDatabase() {
     abstract fun chainLogDao(): ChainLogDao
 
     abstract fun lineageDao(): LineageDao
+
+    abstract fun transitionDao(): TransitionDao
 }
 
 // ---------------------------------------------------------------------------
