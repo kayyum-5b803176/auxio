@@ -487,6 +487,28 @@ constructor(
         // Never strand the queue: if scoping admitted nothing, admit all.
         if (eligible.isEmpty()) for (i in 0 until n) if (!used[i]) eligible.add(i)
 
+        // Embedded-metadata closeness to the current song (album > artist > year).
+        // Random ALSO tightens this: at low Random the metadata gradient is
+        // weighted heavily (same album/artist/era cluster to the front); at high
+        // Random it fades so the queue spreads across metadata. Soft sort, never
+        // a filter — nothing is excluded on metadata grounds.
+        val startSong = heap[start]
+        val startAlbumUid = startSong.album.uid
+        val startArtistUids = startSong.artists.map { it.uid }.toHashSet()
+        val startYear = startSong.date?.year
+        fun metaCloseness(i: Int): Float {
+            val s = heap[i]
+            var score = 0f
+            if (s.album.uid == startAlbumUid) score += META_ALBUM_WEIGHT
+            if (s.artists.any { it.uid in startArtistUids }) score += META_ARTIST_WEIGHT
+            val y = s.date?.year
+            if (y != null && startYear != null && y == startYear) score += META_YEAR_WEIGHT
+            return score
+        }
+        // Metadata sort weight is strongest at Random=-1 (tight) and ~0 at
+        // Random=+1 (wide): (1 - randV)/2 maps -1->1, 0->0.5, +1->0.
+        val metaWeight = ((1f - randV) / 2f).coerceIn(0f, 1f)
+
         // ---- STAGE 2 (Frequency): sort survivors by play count. ----
         // +freq: most-played first; -freq: least-played first; 0: no ordering
         // effect (stable, deferring to Stage 1). Applied as the primary sort key
@@ -509,7 +531,10 @@ constructor(
                     // Stage 2: frequency sort, signed. Weight |freq|, kept below
                     // similarity so Stage 1 dominates when both are set.
                     val f = freqOf(it) * (if (freqV >= 0) 1f else -1f) * kotlin.math.abs(freqV) * STAGE2_WEIGHT
-                    s + f
+                    // Stage 3 (metadata): cluster same album/artist/year to the
+                    // front, weighted up as Random tightens. Fades at high Random.
+                    val m = metaCloseness(it) * metaWeight
+                    s + f + m
                 })
 
         // Emit, honoring the recently-played guard as a soft de-prioritizer.
@@ -633,6 +658,13 @@ constructor(
         // stage) dominates when both sliders are set.
         const val BIAS_BLEND_NUDGE = 0.3f
         const val STAGE2_WEIGHT = 0.5f
+
+        // Embedded-metadata closeness weights (album > artist > year), used by
+        // the Random stage's soft clustering. Album implies artist+era so it's
+        // strongest; shared artist across albums is looser; same year is loosest.
+        const val META_ALBUM_WEIGHT = 0.6f
+        const val META_ARTIST_WEIGHT = 0.4f
+        const val META_YEAR_WEIGHT = 0.2f
 
         // Within-ring ordering weight for proven transition strength. On the same
         // scale as the other within-ring signals (well below RING_SCALE) so it
