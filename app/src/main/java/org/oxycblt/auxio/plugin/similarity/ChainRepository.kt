@@ -415,10 +415,23 @@ constructor(
         val biases = zoneAxisRepository.biasByValue()
         fun bias(id: Long?): Float = id?.let { biases[it] } ?: 0f
 
-        // Directed transition graph: proven "played B after A" evidence. Only
-        // consulted when enabled. Strength = plays/(plays+skips) with +1
-        // shrinkage so a handful of plays isn't over-trusted. Cached per source
-        // key as we encounter each current song during the walk.
+        // Directed transition graph: proven "played B after A" (transitionStrength)
+        // and "skipped B after A" (skipStrength) evidence from the CURRENT song.
+        // Both use +1 shrinkage so a handful of events isn't over-trusted. Empty
+        // when disabled. transitionStrength drives +Similarity; skipStrength drives
+        // -Similarity (actively surface historically-skipped pairs).
+        val transStrengthByKey = HashMap<String, Float>()
+        val skipStrengthByKey = HashMap<String, Float>()
+        if (pluginSettings.transitionGraphEnabled) {
+            keys[start]?.let { srcKey ->
+                for (e in transitionDao.outgoingFromNow(srcKey)) {
+                    val total = e.plays + e.skips
+                    transStrengthByKey[e.toKey] = e.plays.toFloat() / (total + 1)
+                    skipStrengthByKey[e.toKey] = e.skips.toFloat() / (total + 1)
+                }
+            }
+        }
+
         val vectorOf = { i: Int ->
             val k = keys[i]
             when {
@@ -456,36 +469,39 @@ constructor(
         val curTag0 = tagOf(start)
         val curVec0 = vectorOf(start)
 
-        // ---- STAGE 3 (Random): scope which candidates are eligible. ----
-        // Random blends tag distance (relative value + bias) into the current
-        // tag. +1: fully open — opposite Type/Language and not-understood/hated
-        // tags all admitted. -1: closed — only tags at/above 0 relation in the
-        // positive direction (never opposite mood/language). 0: same-Type family.
-        // We compute a per-candidate "tag openness need" and admit it if Random
-        // is open enough.
-        fun tagBlend(i: Int): Float {
+        // ---- STAGE 3 (Random): admit tag-groups by RANKED DEPTH. ----
+        // Instead of an additive threshold, rank every candidate by tag closeness
+        // to the current song (Type tier first, then Language within it, with bias
+        // pulling loved/understood tags closer), then admit the closest fraction
+        // of that ranked list. Random sets the DEPTH: -1 admits only the single
+        // closest group (exact Type+Language), moving toward + opens the next-
+        // closest language, then next, then the next Type tier, ... +1 admits all.
+        // Purely ordinal — no magic-constant magnitudes competing.
+        fun tagCloseness(i: Int): Float {
             val iTag = tagOf(i)
             val typeRel = rel(curTag0?.typeValueId, iTag?.typeValueId)
             val langRel = rel(curTag0?.languageValueId, iTag?.languageValueId)
-            // Most-negative axis dominates "how far/opposite" this tag is.
-            val worst = minOf(typeRel, langRel)
-            // Bias (love/understand) nudges openness: loved/understood tags feel
-            // "closer" and are admitted at tighter Random settings.
             val b = bias(iTag?.typeValueId) + bias(iTag?.languageValueId)
-            return worst + BIAS_BLEND_NUDGE * b
+            // Type dominates (×2) so all same-Type languages rank above any other
+            // Type; language orders within a Type tier; bias nudges either.
+            return 2f * typeRel + langRel + BIAS_BLEND_NUDGE * b
         }
-        // Admission threshold slides with Random: randV=+1 admits everything
-        // (threshold -1), randV=-1 admits only strongly-positive tags
-        // (threshold ~ +1 * ADMIT_TIGHTNESS), randV=0 admits >= 0 (same/positive).
-        val admitThreshold = -randV
+        val candidates = (0 until n).filter { !used[it] }
+        // Rank closest -> farthest.
+        val rankedByCloseness = candidates.sortedByDescending { tagCloseness(it) }
+        // Depth fraction: randV -1 -> 0 (only rank 0), +1 -> 1 (all).
+        val depthFrac = ((randV + 1f) / 2f).coerceIn(0f, 1f)
+        val cutoffIdx =
+            if (rankedByCloseness.isEmpty()) 0
+            else (depthFrac * (rankedByCloseness.size - 1)).toInt()
+        // Admit every candidate whose closeness is >= the cutoff rank's closeness
+        // (so a whole tag-group is admitted together, not split mid-group).
+        val cutoffCloseness =
+            if (rankedByCloseness.isEmpty()) 0f else tagCloseness(rankedByCloseness[cutoffIdx])
         val eligible = ArrayList<Int>(n)
-        for (i in 0 until n) {
-            if (used[i]) continue
-            // Always admit exact same-tag songs regardless of Random.
-            if (tagBlend(i) >= admitThreshold) eligible.add(i)
-        }
-        // Never strand the queue: if scoping admitted nothing, admit all.
-        if (eligible.isEmpty()) for (i in 0 until n) if (!used[i]) eligible.add(i)
+        for (i in candidates) if (tagCloseness(i) >= cutoffCloseness - 1e-4f) eligible.add(i)
+        // Never strand the queue.
+        if (eligible.isEmpty()) eligible.addAll(candidates)
 
         // Embedded-metadata closeness to the current song (album > artist > year).
         // Random ALSO tightens this: at low Random the metadata gradient is
@@ -526,13 +542,27 @@ constructor(
         val eligibleSorted =
             eligible.sortedWith(
                 compareByDescending<Int> {
-                    // Stage 1 (finest): similarity sort, signed. Weight |sim|.
-                    val s = simTo(it) * (if (simV >= 0) 1f else -1f) * kotlin.math.abs(simV)
-                    // Stage 2: frequency sort, signed. Weight |freq|, kept below
-                    // similarity so Stage 1 dominates when both are set.
+                    val k = keys[it]
+                    val trans = k?.let { key -> transStrengthByKey[key] } ?: 0f
+                    val skip = k?.let { key -> skipStrengthByKey[key] } ?: 0f
+                    // Stage 1 (finest): similarity, merging vector proximity with
+                    // transition-graph evidence (transition weighted heavier than
+                    // cosine). +sim seeks proven PLAYS + high cosine; -sim seeks
+                    // proven SKIPS + low cosine (sign flip swaps trans->skip and
+                    // flips cosine).
+                    val simMerged =
+                        if (simV >= 0f) {
+                            SIM_TRANS_WEIGHT * trans + SIM_COS_WEIGHT * simTo(it)
+                        } else {
+                            // negative: actively surface historically-skipped +
+                            // least-similar pairs.
+                            SIM_TRANS_WEIGHT * skip + SIM_COS_WEIGHT * (1f - simTo(it))
+                        }
+                    val s = simMerged * kotlin.math.abs(simV)
+                    // Stage 2: frequency sort, signed, below similarity.
                     val f = freqOf(it) * (if (freqV >= 0) 1f else -1f) * kotlin.math.abs(freqV) * STAGE2_WEIGHT
-                    // Stage 3 (metadata): cluster same album/artist/year to the
-                    // front, weighted up as Random tightens. Fades at high Random.
+                    // Stage 3 (metadata): cluster same album/artist/year, weighted
+                    // up as Random tightens; fades at high Random.
                     val m = metaCloseness(it) * metaWeight
                     s + f + m
                 })
@@ -665,6 +695,13 @@ constructor(
         const val META_ALBUM_WEIGHT = 0.6f
         const val META_ARTIST_WEIGHT = 0.4f
         const val META_YEAR_WEIGHT = 0.2f
+
+        // Stage 1 Similarity merges transition-graph evidence with vector cosine,
+        // transition weighted heavier (proven habit beats raw vector proximity
+        // when they disagree). Used for both +sim (plays/high-cosine) and -sim
+        // (skips/low-cosine).
+        const val SIM_TRANS_WEIGHT = 0.7f
+        const val SIM_COS_WEIGHT = 0.3f
 
         // Within-ring ordering weight for proven transition strength. On the same
         // scale as the other within-ring signals (well below RING_SCALE) so it
