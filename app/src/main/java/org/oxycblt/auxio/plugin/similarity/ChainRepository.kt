@@ -232,7 +232,7 @@ constructor(
         // heard %, resulting sim, and the signed delta from THIS transition.
         chainLog.log(
             "$kind: ${nameOf(from)} → ${nameOf(to)}$keyKind\n" +
-                "   heard $pct%, sim ${"%.2f".format(simAfter)} (${"%+.3f".format(delta)})$zoneNote")
+                "heard $pct%, sim ${"%.2f".format(simAfter)} (${"%+.3f".format(delta)})$zoneNote")
     }
 
     override suspend fun confirmPairing(a: Song, b: Song, similar: Boolean) {
