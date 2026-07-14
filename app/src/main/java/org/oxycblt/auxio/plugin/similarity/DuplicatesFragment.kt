@@ -18,12 +18,16 @@
 
 package org.oxycblt.auxio.plugin.similarity
 
+import android.Manifest
 import android.app.Activity
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.LayoutInflater
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import androidx.fragment.app.activityViewModels
 import androidx.fragment.app.viewModels
@@ -142,8 +146,33 @@ class DuplicatesFragment : ViewBindingFragment<FragmentDuplicatesBinding>() {
             }
         }
 
-        duplicatesModel.scanIfNeeded()
+        // Start the background fingerprint service (survives leaving the screen /
+        // screen-off) unless a scan is already running or results are showing.
+        // The ViewModel observes the service and groups from cache when it's done.
+        if (!duplicatesModel.isScanRunning &&
+            duplicatesModel.scanState.value is DuplicatesViewModel.ScanState.Idle) {
+            requestThenScan()
+        }
     }
+
+    private fun requestThenScan() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted =
+                ContextCompat.checkSelfPermission(
+                    requireContext(), Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                return
+            }
+        }
+        DuplicateScanService.start(requireContext())
+    }
+
+    private val notifPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            DuplicateScanService.start(requireContext())
+        }
 
     private fun confirmDelete(song: Song, prioritized: Boolean) {
         MaterialAlertDialogBuilder(requireContext())

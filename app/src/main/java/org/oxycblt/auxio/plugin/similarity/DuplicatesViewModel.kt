@@ -24,13 +24,9 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import org.oxycblt.auxio.music.MusicRepository
 import org.oxycblt.musikr.Song
 import timber.log.Timber as L
@@ -48,11 +44,11 @@ class DuplicatesViewModel
 @Inject
 constructor(
     private val musicRepository: MusicRepository,
-    private val fingerprinter: AudioFingerprinter,
     private val fingerprintRepository: FingerprintRepository,
     private val duplicateFinder: DuplicateFinder,
     private val qualityAnalyzer: QualityAnalyzer,
     private val pluginSettings: PluginSettings,
+    private val scanProgress: DuplicateScanProgress,
     private val songDeleter: SongDeleter
 ) : ViewModel() {
 
@@ -100,91 +96,66 @@ constructor(
 
     private var scanJob: Job? = null
 
-    /** Start a scan if one isn't already running or complete. */
-    fun scanIfNeeded() {
-        if (_scanState.value !is ScanState.Idle) return
-        scan()
-    }
-
-    fun rescan() {
-        scanJob?.cancel()
-        scan()
-    }
-
-    private fun scan() {
-        val songs = musicRepository.library?.songs?.toList().orEmpty()
-        _processingLog.value = emptyList()
-        if (songs.isEmpty()) {
-            _scanState.value = ScanState.Results(emptyList())
-            return
+    init {
+        // Observe the background fingerprint service. While it runs, mirror its
+        // progress; when it finishes, do the (fast, in-memory) grouping/ranking
+        // from the now-cached fingerprints. The heavy fingerprint pass lives in
+        // the service so it survives leaving this screen and screen-off.
+        viewModelScope.launch {
+            scanProgress.state.collect { s ->
+                when (s) {
+                    is ScanProgress.State.Idle -> {
+                        if (_scanState.value !is ScanState.Results) {
+                            _scanState.value = ScanState.Idle
+                        }
+                    }
+                    is ScanProgress.State.Running -> {
+                        _processingLog.value = s.log
+                        _scanState.value = ScanState.Scanning(s.done, s.total, s.currentFile)
+                    }
+                    is ScanProgress.State.Done -> {
+                        _processingLog.value = s.log
+                        if (s.stopped) {
+                            // Cancelled: show whatever grouping we can from cache
+                            // so partial progress isn't wasted.
+                            groupFromCache()
+                        } else {
+                            groupFromCache()
+                        }
+                    }
+                }
+            }
         }
+    }
 
+    /** True if the background fingerprint service is currently running. */
+    val isScanRunning: Boolean
+        get() = scanProgress.isRunning
+
+    /**
+     * Group + rank duplicates from ALREADY-CACHED fingerprints (no decoding).
+     * Runs after the background service has populated the cache.
+     */
+    private fun groupFromCache() {
+        scanJob?.cancel()
         scanJob =
             viewModelScope.launch {
-                _scanState.value = ScanState.Scanning(0, songs.size, null)
-                // Drop cache rows for songs no longer in the library so the DB
-                // doesn't grow without bound as the user's collection changes.
-                fingerprintRepository.prune(songs)
-
-                var done = 0
-                // Bounded parallelism: decoding is I/O+codec heavy; a couple
-                // of concurrent decodes saturate most devices without
-                // starving the UI or the media session.
-                val semaphore = Semaphore(CONCURRENT_DECODES)
+                val songs = musicRepository.library?.songs?.toList().orEmpty()
+                if (songs.isEmpty()) {
+                    _scanState.value = ScanState.Results(emptyList())
+                    return@launch
+                }
                 val results =
                     songs
-                        .map { song ->
-                            async {
-                                // Cache first: a valid cached entry skips the
-                                // expensive decode+FFT entirely. Only true
-                                // misses (new song, changed file, or bumped
-                                // algorithm version) fall through to analysis.
-                                val cached = fingerprintRepository.getCached(song)
-                                val result =
-                                    if (cached != null) {
-                                        cached
-                                    } else {
-                                        semaphore.withPermit {
-                                            val computed =
-                                                fingerprinter.fingerprint(
-                                                    song.uri, song.durationMs)
-                                            // Persist even an empty/failed result
-                                            // so an unanalyzable file isn't retried
-                                            // every scan.
-                                            val toStore =
-                                                computed
-                                                    ?: FingerprintResult(
-                                                        IntArray(0), FloatArray(0))
-                                            fingerprintRepository.put(song, toStore)
-                                            computed
-                                        }
-                                    }
-                                done++
-                                val fileName = song.path.name ?: song.uri.toString()
-                                pushLog(fileName, cached != null)
-                                _scanState.value =
-                                    ScanState.Scanning(done, songs.size, fileName)
-                                if (result != null && result.fingerprint.isNotEmpty()) {
-                                    song to result
-                                } else {
-                                    null
-                                }
-                            }
+                        .mapNotNull { song ->
+                            val fp = fingerprintRepository.getCached(song)
+                            if (fp != null && fp.fingerprint.isNotEmpty()) song to fp else null
                         }
-                        .awaitAll()
-                        .filterNotNull()
                         .toMap()
 
-                L.d("Analyzed ${results.size}/${songs.size} songs")
+                L.d("Grouping ${results.size}/${songs.size} cached fingerprints")
                 val groups = duplicateFinder.find(results)
-
-                // Priority folders: a snapshot of the user's configured names,
-                // read once per scan. Files under these folders are preferred as
-                // the "keep" and require an extra delete confirmation.
                 val priorityMatcher = PriorityMatcher(pluginSettings.priorityFolderNames)
-
-                // Rank each group by TRUE quality (QualityAnalyzer), with
-                // priority-folder files preferred as the keep.
                 val rankedGroups =
                     groups.map { group ->
                         val candidates =
@@ -202,11 +173,6 @@ constructor(
                     }
                 _scanState.value = ScanState.Results(rankedGroups)
             }
-    }
-
-    private fun pushLog(fileName: String, cached: Boolean) {
-        val entry = if (cached) "$fileName (cached)" else fileName
-        _processingLog.value = (listOf(entry) + _processingLog.value).take(LOG_WINDOW)
     }
 
     fun delete(song: Song) {
@@ -253,8 +219,4 @@ constructor(
         _scanState.value = ScanState.Results(newGroups)
     }
 
-    private companion object {
-        const val CONCURRENT_DECODES = 2
-        const val LOG_WINDOW = 6
-    }
 }
