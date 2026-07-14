@@ -55,6 +55,12 @@
             app:summary="@string/set_find_duplicates_desc"
             app:title="@string/set_find_duplicates" />
 
+        <Preference
+            app:isPreferenceVisible="false"
+            app:key="@string/set_key_acoustic_scan"
+            app:summary="@string/set_acoustic_scan_desc"
+            app:title="@string/set_acoustic_scan" />
+
     </PreferenceCategory>
 
 </PreferenceScreen>

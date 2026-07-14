@@ -87,6 +87,15 @@ interface ChainRepository {
 
     /** Display rows of outgoing transitions from [song], strongest-first, for the log. */
     suspend fun transitionsForCurrent(song: Song): List<TransitionRow>
+
+    /**
+     * Force-(re)compute the acoustic seed for one song and persist it, replacing
+     * any existing embedding's vector. Used by the proactive Acoustic Scan so the
+     * whole library gets audio-grounded seeds without waiting for organic
+     * playback. Returns true if an acoustic seed was written, false if extraction
+     * failed (left untouched / hash-seeded).
+     */
+    suspend fun seedAcoustic(song: Song): Boolean
 }
 
 /** A display row for the transition log: destination name + counts + strength. */
@@ -422,7 +431,13 @@ constructor(
         // All stored relations (sparse) for cheap in-memory lookup during the walk.
         val relations = zoneAxisRepository.allRelations()
         fun rel(a: Long?, b: Long?): Float {
-            if (a == null || b == null || a == b) return 0f
+            // No tag on either side -> neutral (0), genuinely no information.
+            if (a == null || b == null) return 0f
+            // Same tag -> maximally close (+1). Previously this returned 0, which
+            // made an identically-tagged song score the SAME as an untagged one,
+            // and let a different-but-positively-related tag outrank an identical
+            // one. Same-tag must always be the closest.
+            if (a == b) return 1f
             return relations[minOf(a, b) to maxOf(a, b)] ?: 0f
         }
         // Per-tag bias (love/understand), sparse; unset/neutral = 0 = no effect.
@@ -618,8 +633,29 @@ constructor(
         transitionDao.nuke()
     }
 
-    override suspend fun transitionsForCurrent(song: Song): List<TransitionRow> {
-        val fromKey = keyOf(song) ?: return emptyList()
+    override suspend fun seedAcoustic(song: Song): Boolean {
+        val key = keyOf(song) ?: return false
+        val now = System.currentTimeMillis()
+        val acoustic =
+            try {
+                acousticFeatures.extract(song.uri, song.durationMs)
+            } catch (e: Exception) {
+                L.e("SmartChain: acoustic scan extract failed: $e")
+                null
+            }
+        if (acoustic == null || acoustic.size != DIMENSIONS) return false
+        val existing = embeddingDao.get(key)
+        // Preserve learned observation history if present; only replace the vector.
+        embeddingDao.put(
+            SongEmbedding(
+                key = key,
+                vector = normalized(acoustic),
+                observationCount = existing?.observationCount ?: 0,
+                lastUpdatedMs = now))
+        return true
+    }
+
+    override suspend fun transitionsForCurrent(song: Song): List<TransitionRow> {        val fromKey = keyOf(song) ?: return emptyList()
         val edges = transitionDao.outgoingFromNow(fromKey)
         if (edges.isEmpty()) return emptyList()
         // Resolve each destination key to a display name. uid: keys resolve via

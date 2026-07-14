@@ -61,6 +61,10 @@ class RootPreferenceFragment : BasePreferenceFragment(R.xml.preferences_root) {
         // is invisible and no plugin code runs at all.
         findPreference<Preference>(getString(R.string.set_key_find_duplicates))?.isVisible =
             pluginSettings.similarityDetectionEnabled
+        // The acoustic scan seeds the Smart Chain, so it's shown only while Smart
+        // Chain is enabled (re-checked each resume, same as duplicates above).
+        findPreference<Preference>(getString(R.string.set_key_acoustic_scan))?.isVisible =
+            pluginSettings.smartChainEnabled
     }
 
     override fun onOpenDialogPreference(preference: WrappedDialogPreference) {
@@ -104,6 +108,11 @@ class RootPreferenceFragment : BasePreferenceFragment(R.xml.preferences_root) {
                 L.d("Navigating to duplicates screen")
                 findNavController()
                     .navigateSafe(RootPreferenceFragmentDirections.findDuplicates())
+            }
+            getString(R.string.set_key_acoustic_scan) -> {
+                L.d("Navigating to acoustic scan screen")
+                findNavController()
+                    .navigateSafe(RootPreferenceFragmentDirections.acousticScan())
             }
             getString(R.string.set_key_reindex) -> musicModel.refresh()
             getString(R.string.set_key_rescan) -> musicModel.rescan()

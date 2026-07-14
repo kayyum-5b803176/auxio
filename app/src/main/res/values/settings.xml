@@ -197,6 +197,7 @@
     <string name="set_key_plugins" translatable="false">auxio_plugins</string>
     <string name="set_key_similarity_detection" translatable="false">auxio_similarity_detection</string>
     <string name="set_key_find_duplicates" translatable="false">auxio_find_duplicates</string>
+    <string name="set_key_acoustic_scan" translatable="false">auxio_acoustic_scan</string>
     <string name="set_key_priority_folders" translatable="false">auxio_priority_folders</string>
     <string name="set_key_smart_chain" translatable="false">auxio_smart_chain</string>
     <string name="set_key_smart_chain_logs" translatable="false">auxio_smart_chain_logs</string>

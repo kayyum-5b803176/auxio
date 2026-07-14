@@ -42,6 +42,9 @@
         <action
             android:id="@+id/find_duplicates"
             app:destination="@id/duplicates_fragment" />
+        <action
+            android:id="@+id/acoustic_scan"
+            app:destination="@id/acoustic_scan_fragment" />
     </fragment>
 
     <fragment
@@ -86,6 +89,12 @@
         android:name="org.oxycblt.auxio.plugin.similarity.DuplicatesFragment"
         android:label="duplicates_fragment"
         tools:layout="@layout/fragment_duplicates" />
+
+    <fragment
+        android:id="@+id/acoustic_scan_fragment"
+        android:name="org.oxycblt.auxio.plugin.similarity.AcousticScanFragment"
+        android:label="acoustic_scan_fragment"
+        tools:layout="@layout/fragment_acoustic_scan" />
 
     <fragment
         android:id="@+id/ui_preferences_fragment"
