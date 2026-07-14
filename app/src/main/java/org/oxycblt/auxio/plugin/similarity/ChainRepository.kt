@@ -96,6 +96,13 @@ interface ChainRepository {
      * failed (left untouched / hash-seeded).
      */
     suspend fun seedAcoustic(song: Song): Boolean
+
+    /**
+     * From [songs], returns only those NOT already acoustically seeded, so the
+     * Acoustic Scan can skip work it has already done across app opens. [rescan]
+     * forces all songs through regardless.
+     */
+    suspend fun unseededAcoustic(songs: List<Song>): List<Song>
 }
 
 /** A display row for the transition log: destination name + counts + strength. */
@@ -179,15 +186,15 @@ constructor(
                 L.e("SmartChain: acoustic seed failed, using hash seed: $e")
                 null
             }
-        val seedVec =
-            if (acoustic != null && acoustic.size == DIMENSIONS) normalized(acoustic)
-            else seedVector(song, key)
+        val acousticOk = acoustic != null && acoustic.size == DIMENSIONS
+        val seedVec = if (acousticOk) normalized(acoustic!!) else seedVector(song, key)
         val seeded =
             SongEmbedding(
                 key = key,
                 vector = seedVec,
                 observationCount = 0,
-                lastUpdatedMs = now)
+                lastUpdatedMs = now,
+                acousticSeeded = acousticOk)
         embeddingDao.put(seeded)
         return seeded
     }
@@ -633,6 +640,14 @@ constructor(
         transitionDao.nuke()
     }
 
+    override suspend fun unseededAcoustic(songs: List<Song>): List<Song> {
+        val seeded = embeddingDao.acousticSeededKeys().toHashSet()
+        return songs.filter { song ->
+            val key = keyOf(song) ?: return@filter true
+            key !in seeded
+        }
+    }
+
     override suspend fun seedAcoustic(song: Song): Boolean {
         val key = keyOf(song) ?: return false
         val now = System.currentTimeMillis()
@@ -651,7 +666,8 @@ constructor(
                 key = key,
                 vector = normalized(acoustic),
                 observationCount = existing?.observationCount ?: 0,
-                lastUpdatedMs = now))
+                lastUpdatedMs = now,
+                acousticSeeded = true))
         return true
     }
 

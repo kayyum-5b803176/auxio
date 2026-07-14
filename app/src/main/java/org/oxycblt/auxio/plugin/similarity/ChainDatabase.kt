@@ -50,7 +50,7 @@ import kotlinx.coroutines.flow.Flow
     entities =
         [SongEmbedding::class, SongQuality::class, ChainLogEntry::class, SongLineage::class,
             TransitionEdge::class],
-    version = 7,
+    version = 8,
     exportSchema = false)
 @TypeConverters(VectorConverter::class)
 abstract class ChainDatabase : RoomDatabase() {
@@ -84,6 +84,9 @@ interface EmbeddingDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun put(embedding: SongEmbedding)
 
+    @Query("SELECT key FROM SongEmbedding WHERE acousticSeeded = 1")
+    suspend fun acousticSeededKeys(): List<String>
+
     @Query("DELETE FROM SongEmbedding") suspend fun nuke()
 }
 
@@ -101,7 +104,8 @@ data class SongEmbedding(
     @PrimaryKey val key: String,
     val vector: FloatArray,
     val observationCount: Int,
-    val lastUpdatedMs: Long
+    val lastUpdatedMs: Long,
+    val acousticSeeded: Boolean = false
 ) {
     // Room data class with an array member: override equals/hashCode by key
     // (identity is the key; the array is payload).

@@ -360,11 +360,6 @@
     <string name="set_plugins_desc">Enable optional experimental features</string>
     <string name="set_similarity_detection">Similarity detection</string>
     <string name="set_similarity_detection_desc">Acoustically fingerprint your library to find duplicate songs. Adds a "Find duplicates" entry to Library settings. Has no effect on the app while disabled.</string>
-    <string name="set_acoustic_scan">Acoustic scan</string>
-    <string name="set_acoustic_scan_desc">Analyze every song\'s audio to seed the Smart Chain with how each track actually sounds, so new and never-played songs are placed by sound from the start.</string>
-    <string name="lbl_acoustic_rescan">Rescan</string>
-    <string name="fmt_acoustic_progress">Scanning %1$d / %2$d</string>
-    <string name="fmt_acoustic_done">Done: %1$d seeded, %2$d skipped, of %3$d</string>
     <string name="set_find_duplicates">Find duplicates</string>
     <string name="set_find_duplicates_desc">Scan for files containing the same recording</string>
     <string name="set_priority_folders">Priority folders</string>
@@ -391,6 +386,11 @@
     <string name="set_smart_chain_logs_desc">See the most recent chain learning updates</string>
     <string name="set_smart_chain_logs_clear">Clear logs</string>
     <string name="set_smart_chain_logs_empty">No chain activity yet. Enable Smart chain and play some music — learning updates will appear here.</string>
+    <string name="set_acoustic_scan">Acoustic scan</string>
+    <string name="set_acoustic_scan_desc">Analyzes each song\'s audio so new songs are placed by their actual sound</string>
+    <string name="lbl_acoustic_rescan">Rescan</string>
+    <string name="fmt_acoustic_progress">Scanning %1$d / %2$d</string>
+    <string name="fmt_acoustic_done">Done: %1$d seeded, %2$d skipped, of %3$d</string>
     <string name="dup_scanning">Analyzing library for duplicates…</string>
     <string name="dup_scan_progress">Fingerprinted %1$d/%2$d songs</string>
     <string name="dup_none_found">No duplicates found. Every song in your library appears to be acoustically unique.</string>

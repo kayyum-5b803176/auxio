@@ -66,16 +66,20 @@ constructor(
         scanJob?.cancel()
         _scanState.value = ScanState.Idle
         _processingLog.value = emptyList()
-        scan()
+        scan(force = true)
     }
 
-    private fun scan() {
+    private fun scan(force: Boolean = false) {
         scanJob =
             viewModelScope.launch {
-                val songs = musicRepository.library?.songs?.toList().orEmpty()
+                val all = musicRepository.library?.songs?.toList().orEmpty()
+                // Skip songs already acoustically seeded (cache across opens),
+                // unless the user forced a full rescan.
+                val songs = if (force) all else chainRepository.unseededAcoustic(all)
                 val total = songs.size
                 if (total == 0) {
-                    _scanState.value = ScanState.Results(0, 0, 0)
+                    // Nothing to do — either empty library or everything cached.
+                    _scanState.value = ScanState.Results(0, 0, all.size)
                     return@launch
                 }
                 var seeded = 0

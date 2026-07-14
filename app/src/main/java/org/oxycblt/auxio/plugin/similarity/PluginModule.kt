@@ -48,6 +48,16 @@ val MIGRATION_5_6 =
     }
 
 /** Chain DB v6 -> v7: adds the directed TransitionEdge graph table. Additive. */
+/** Chain DB v7 -> v8: adds acousticSeeded flag to SongEmbedding (default 0). */
+val MIGRATION_7_8 =
+    object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "ALTER TABLE `SongEmbedding` ADD COLUMN `acousticSeeded` " +
+                    "INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
 val MIGRATION_6_7 =
     object : Migration(6, 7) {
         override fun migrate(db: SupportSQLiteDatabase) {
@@ -141,7 +151,7 @@ class PluginRoomModule {
             // change to ChainDatabase must ship an explicit Migration(from, to)
             // via .addMigrations(...) — never a blanket destructive fallback for
             // upgrades, and never another filename change (that orphans data).
-            .addMigrations(MIGRATION_5_6, MIGRATION_6_7)
+            .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
             .fallbackToDestructiveMigrationOnDowngrade()
             .build()
 
