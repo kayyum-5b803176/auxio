@@ -30,9 +30,10 @@ import org.oxycblt.auxio.ui.ViewBindingFragment
 import org.oxycblt.auxio.util.collectImmediately
 
 /**
- * Proactive whole-library acoustic seeding, with progress + per-file log
- * (mirrors the Find Duplicates screen). Grounds every song's embedding in how it
- * sounds without waiting for organic playback.
+ * Proactive whole-library acoustic seeding, with progress + per-file log.
+ * Structurally identical to the Find Duplicates screen: centered progress
+ * layout, true-total progress denominator, cached entries counted and logged
+ * rather than hidden.
  */
 @AndroidEntryPoint
 class AcousticScanFragment : ViewBindingFragment<FragmentAcousticScanBinding>() {
@@ -56,20 +57,23 @@ class AcousticScanFragment : ViewBindingFragment<FragmentAcousticScanBinding>() 
             when (state) {
                 is AcousticScanViewModel.ScanState.Idle -> {}
                 is AcousticScanViewModel.ScanState.Scanning -> {
-                    binding.acousticProgress.isVisible = true
+                    binding.acousticProgressContainer.isVisible = true
+                    binding.acousticRescan.isVisible = false
                     binding.acousticProgress.max = state.total
                     binding.acousticProgress.progress = state.done
-                    binding.acousticStatus.text =
+                    binding.acousticProgressText.text =
                         getString(R.string.fmt_acoustic_progress, state.done, state.total)
-                    binding.acousticCurrent.text = state.currentFile ?: ""
-                    binding.acousticRescan.isVisible = false
                 }
                 is AcousticScanViewModel.ScanState.Results -> {
+                    binding.acousticProgressContainer.isVisible = true
                     binding.acousticProgress.isVisible = false
-                    binding.acousticCurrent.text = ""
-                    binding.acousticStatus.text =
+                    binding.acousticProgressText.text =
                         getString(
-                            R.string.fmt_acoustic_done, state.seeded, state.failed, state.total)
+                            R.string.fmt_acoustic_done,
+                            state.seeded,
+                            state.cached,
+                            state.failed,
+                            state.total)
                     binding.acousticRescan.isVisible = true
                 }
             }

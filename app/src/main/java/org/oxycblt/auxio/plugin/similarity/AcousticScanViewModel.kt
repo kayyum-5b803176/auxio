@@ -23,17 +23,24 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.oxycblt.auxio.music.MusicRepository
 import timber.log.Timber as L
 
 /**
  * Drives the Acoustic Scan screen: proactively computes an audio-grounded seed
  * embedding for every song in the library, independent of playback, so new /
- * never-played songs are placed by how they SOUND from the start. Mirrors the
- * Find Duplicates screen's progress + per-file log structure.
+ * never-played songs are placed by how they SOUND from the start. Structurally
+ * identical to the Find Duplicates screen: progress is always shown against the
+ * TRUE total library size (never the filtered "still need work" count), already-
+ * seeded songs are still counted and logged (annotated "(cached)") rather than
+ * excluded from the denominator, and decoding runs with bounded parallelism.
  */
 @HiltViewModel
 class AcousticScanViewModel
@@ -46,7 +53,8 @@ constructor(
     sealed interface ScanState {
         data object Idle : ScanState
         data class Scanning(val done: Int, val total: Int, val currentFile: String?) : ScanState
-        data class Results(val seeded: Int, val failed: Int, val total: Int) : ScanState
+        data class Results(val seeded: Int, val cached: Int, val failed: Int, val total: Int) :
+            ScanState
     }
 
     private val _scanState = MutableStateFlow<ScanState>(ScanState.Idle)
@@ -59,7 +67,7 @@ constructor(
 
     fun scanIfNeeded() {
         if (_scanState.value !is ScanState.Idle) return
-        scan()
+        scan(force = false)
     }
 
     fun rescan() {
@@ -69,42 +77,75 @@ constructor(
         scan(force = true)
     }
 
-    private fun scan(force: Boolean = false) {
+    private fun scan(force: Boolean) {
+        val songs = musicRepository.library?.songs?.toList().orEmpty()
+        _processingLog.value = emptyList()
+        if (songs.isEmpty()) {
+            _scanState.value = ScanState.Results(0, 0, 0, 0)
+            return
+        }
+
         scanJob =
             viewModelScope.launch {
-                val all = musicRepository.library?.songs?.toList().orEmpty()
-                // Skip songs already acoustically seeded (cache across opens),
-                // unless the user forced a full rescan.
-                val songs = if (force) all else chainRepository.unseededAcoustic(all)
-                val total = songs.size
-                if (total == 0) {
-                    // Nothing to do — either empty library or everything cached.
-                    _scanState.value = ScanState.Results(0, 0, all.size)
-                    return@launch
-                }
-                var seeded = 0
-                var failed = 0
-                for ((i, song) in songs.withIndex()) {
-                    val name = song.path.name ?: song.uri.toString()
-                    _scanState.value = ScanState.Scanning(i, total, name)
-                    val ok =
-                        try {
-                            chainRepository.seedAcoustic(song)
-                        } catch (e: Exception) {
-                            L.e("AcousticScan: seed failed for $name: $e")
-                            false
+                _scanState.value = ScanState.Scanning(0, songs.size, null)
+                // Which songs already have a real acoustic seed - checked ONCE
+                // up front so per-song work below is a cheap set lookup, not a
+                // DB round trip each time.
+                val alreadySeeded =
+                    if (force) emptySet()
+                    else (songs.toSet() - chainRepository.unseededAcoustic(songs).toSet())
+
+                var done = 0
+                var seededCount = 0
+                var cachedCount = 0
+                var failedCount = 0
+                // Bounded parallelism: decoding is I/O+codec heavy; a couple of
+                // concurrent decodes saturate most devices without starving the
+                // UI or the media session (matches Find Duplicates).
+                val semaphore = Semaphore(CONCURRENT_DECODES)
+                songs
+                    .map { song ->
+                        async {
+                            val fileName = song.path.name ?: song.uri.toString()
+                            val isCached = song in alreadySeeded
+                            val ok =
+                                if (isCached) {
+                                    true
+                                } else {
+                                    semaphore.withPermit {
+                                        try {
+                                            chainRepository.seedAcoustic(song)
+                                        } catch (e: Exception) {
+                                            L.e("AcousticScan: seed failed for $fileName: $e")
+                                            false
+                                        }
+                                    }
+                                }
+                            done++
+                            when {
+                                isCached -> cachedCount++
+                                ok -> seededCount++
+                                else -> failedCount++
+                            }
+                            pushLog(fileName, isCached, ok)
+                            _scanState.value = ScanState.Scanning(done, songs.size, fileName)
                         }
-                    if (ok) seeded++ else failed++
-                    appendLog(if (ok) "✓ $name" else "✗ $name (no acoustic seed)")
-                }
-                _scanState.value = ScanState.Results(seeded, failed, total)
+                    }
+                    .awaitAll()
+
+                _scanState.value =
+                    ScanState.Results(seededCount, cachedCount, failedCount, songs.size)
             }
     }
 
-    private fun appendLog(line: String) {
-        val cur = _processingLog.value
-        val next = (cur + line)
-        _processingLog.value = if (next.size > LOG_CAP) next.takeLast(LOG_CAP) else next
+    private fun pushLog(fileName: String, cached: Boolean, ok: Boolean) {
+        val entry =
+            when {
+                cached -> "$fileName (cached)"
+                !ok -> "$fileName (failed)"
+                else -> fileName
+            }
+        _processingLog.value = (listOf(entry) + _processingLog.value).take(LOG_WINDOW)
     }
 
     override fun onCleared() {
@@ -112,6 +153,7 @@ constructor(
     }
 
     private companion object {
-        const val LOG_CAP = 200
+        const val LOG_WINDOW = 6
+        const val CONCURRENT_DECODES = 2
     }
 }

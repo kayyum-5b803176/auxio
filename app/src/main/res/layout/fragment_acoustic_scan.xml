@@ -5,6 +5,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="?attr/colorSurface"
+    android:transitionGroup="true"
     tools:context=".plugin.similarity.AcousticScanFragment">
 
     <org.oxycblt.auxio.ui.CoordinatorAppBarLayout
@@ -22,61 +23,48 @@
     </org.oxycblt.auxio.ui.CoordinatorAppBarLayout>
 
     <LinearLayout
+        android:id="@+id/acoustic_progress_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:gravity="center"
         android:orientation="vertical"
-        android:padding="@dimen/spacing_medium"
-        app:layout_behavior="com.google.android.material.appbar.AppBarLayout$ScrollingViewBehavior">
-
-        <TextView
-            android:id="@+id/acoustic_status"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingVertical="@dimen/spacing_small"
-            android:textAppearance="@style/TextAppearance.Auxio.BodyLarge"
-            tools:text="Scanning 42 / 300" />
+        android:padding="@dimen/spacing_large"
+        android:visibility="gone"
+        app:layout_behavior="com.google.android.material.appbar.AppBarLayout$ScrollingViewBehavior"
+        tools:visibility="visible">
 
         <com.google.android.material.progressindicator.LinearProgressIndicator
             android:id="@+id/acoustic_progress"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="@dimen/spacing_small"
-            app:trackCornerRadius="4dp" />
+            android:layout_height="wrap_content" />
 
         <TextView
-            android:id="@+id/acoustic_current"
+            android:id="@+id/acoustic_progress_text"
+            style="@style/TextAppearance.Auxio.BodyMedium"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/spacing_medium"
+            tools:text="Scanning 6/231 songs" />
+
+        <TextView
+            android:id="@+id/acoustic_log"
+            style="@style/TextAppearance.Auxio.BodySmall"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:ellipsize="middle"
-            android:maxLines="1"
-            android:textAppearance="@style/TextAppearance.Auxio.LabelMedium"
+            android:layout_marginTop="@dimen/spacing_medium"
+            android:gravity="center"
+            android:maxLines="6"
             android:textColor="?android:attr/textColorSecondary"
-            tools:text="song-name.flac" />
+            tools:text="song1.flac\nsong2.mp3 (cached)\nsong3.m4a" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/acoustic_rescan"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginVertical="@dimen/spacing_small"
+            android:layout_marginTop="@dimen/spacing_large"
             android:text="@string/lbl_acoustic_rescan"
             android:visibility="gone"
             tools:visibility="visible" />
-
-        <ScrollView
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1">
-
-            <TextView
-                android:id="@+id/acoustic_log"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:fontFamily="monospace"
-                android:textAppearance="@style/TextAppearance.Auxio.LabelMedium"
-                android:textColor="?android:attr/textColorSecondary"
-                tools:text="✓ song-a.flac\n✓ song-b.mp3" />
-
-        </ScrollView>
 
     </LinearLayout>
 

@@ -389,8 +389,8 @@
     <string name="set_acoustic_scan">Acoustic scan</string>
     <string name="set_acoustic_scan_desc">Analyzes each song\'s audio so new songs are placed by their actual sound</string>
     <string name="lbl_acoustic_rescan">Rescan</string>
-    <string name="fmt_acoustic_progress">Scanning %1$d / %2$d</string>
-    <string name="fmt_acoustic_done">Done: %1$d seeded, %2$d skipped, of %3$d</string>
+    <string name="fmt_acoustic_progress">Scanned %1$d/%2$d songs</string>
+    <string name="fmt_acoustic_done">%1$d seeded, %2$d cached, %3$d failed, of %4$d</string>
     <string name="dup_scanning">Analyzing library for duplicates…</string>
     <string name="dup_scan_progress">Fingerprinted %1$d/%2$d songs</string>
     <string name="dup_none_found">No duplicates found. Every song in your library appears to be acoustically unique.</string>
