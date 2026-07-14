@@ -88,12 +88,6 @@ constructor(
         scanJob =
             viewModelScope.launch {
                 _scanState.value = ScanState.Scanning(0, songs.size, null)
-                // Which songs already have a real acoustic seed - checked ONCE
-                // up front so per-song work below is a cheap set lookup, not a
-                // DB round trip each time.
-                val alreadySeeded =
-                    if (force) emptySet()
-                    else (songs.toSet() - chainRepository.unseededAcoustic(songs).toSet())
 
                 var done = 0
                 var seededCount = 0
@@ -101,13 +95,17 @@ constructor(
                 var failedCount = 0
                 // Bounded parallelism: decoding is I/O+codec heavy; a couple of
                 // concurrent decodes saturate most devices without starving the
-                // UI or the media session (matches Find Duplicates).
+                // UI or the media session (matches Find Duplicates). The cached-
+                // status CHECK itself runs for every song inside this same
+                // concurrent loop (never as a sequential pre-pass over the whole
+                // library first) — that pre-pass was the startup-lag bug: 230
+                // sequential DB round trips before any progress could show.
                 val semaphore = Semaphore(CONCURRENT_DECODES)
                 songs
                     .map { song ->
                         async {
                             val fileName = song.path.name ?: song.uri.toString()
-                            val isCached = song in alreadySeeded
+                            val isCached = !force && chainRepository.isAcousticSeeded(song)
                             val ok =
                                 if (isCached) {
                                     true

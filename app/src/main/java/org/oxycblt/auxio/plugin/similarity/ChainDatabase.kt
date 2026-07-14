@@ -84,9 +84,6 @@ interface EmbeddingDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun put(embedding: SongEmbedding)
 
-    @Query("SELECT key FROM SongEmbedding WHERE acousticSeeded = 1")
-    suspend fun acousticSeededKeys(): List<String>
-
     @Query("DELETE FROM SongEmbedding") suspend fun nuke()
 }
 

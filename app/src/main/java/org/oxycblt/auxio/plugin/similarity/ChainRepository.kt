@@ -98,11 +98,12 @@ interface ChainRepository {
     suspend fun seedAcoustic(song: Song): Boolean
 
     /**
-     * From [songs], returns only those NOT already acoustically seeded, so the
-     * Acoustic Scan can skip work it has already done across app opens. [rescan]
-     * forces all songs through regardless.
+     * Whether [song] already has a real acoustic seed. Cheap per-song check
+     * (one key resolve + one DB lookup) — call this INSIDE a concurrent loop,
+     * never in a sequential pre-pass over the whole library, or the scan stalls
+     * before any progress can show (this was the acoustic-scan startup-lag bug).
      */
-    suspend fun unseededAcoustic(songs: List<Song>): List<Song>
+    suspend fun isAcousticSeeded(song: Song): Boolean
 }
 
 /** A display row for the transition log: destination name + counts + strength. */
@@ -640,12 +641,9 @@ constructor(
         transitionDao.nuke()
     }
 
-    override suspend fun unseededAcoustic(songs: List<Song>): List<Song> {
-        val seeded = embeddingDao.acousticSeededKeys().toHashSet()
-        return songs.filter { song ->
-            val key = keyOf(song) ?: return@filter true
-            key !in seeded
-        }
+    override suspend fun isAcousticSeeded(song: Song): Boolean {
+        val key = keyOf(song) ?: return false
+        return embeddingDao.get(key)?.acousticSeeded == true
     }
 
     override suspend fun seedAcoustic(song: Song): Boolean {
