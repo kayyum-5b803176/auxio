@@ -106,6 +106,7 @@ constructor(
     private val musicRepository: org.oxycblt.auxio.music.MusicRepository,
     private val zoneAxisRepository: ZoneAxisRepository,
     private val transitionDao: TransitionDao,
+    private val acousticFeatures: AcousticFeatures,
     private val pluginSettings: PluginSettings,
     private val chainLog: ChainLog
 ) : ChainRepository {
@@ -159,10 +160,23 @@ constructor(
         embeddingDao.get(key)?.let {
             return it
         }
+        // Prefer an ACOUSTIC seed (grounded in how the song sounds); this decodes
+        // audio, so it runs once here and is then persisted. Fall back to the
+        // cheap artist/genre-hash seed if extraction fails (DRM, codec, etc.).
+        val acoustic =
+            try {
+                acousticFeatures.extract(song.uri, song.durationMs)
+            } catch (e: Exception) {
+                L.e("SmartChain: acoustic seed failed, using hash seed: $e")
+                null
+            }
+        val seedVec =
+            if (acoustic != null && acoustic.size == DIMENSIONS) normalized(acoustic)
+            else seedVector(song, key)
         val seeded =
             SongEmbedding(
                 key = key,
-                vector = seedVector(song, key),
+                vector = seedVec,
                 observationCount = 0,
                 lastUpdatedMs = now)
         embeddingDao.put(seeded)

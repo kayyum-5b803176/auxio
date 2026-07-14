@@ -98,6 +98,8 @@ interface PluginModule {
 
     @Binds fun audioFingerprinter(impl: AudioFingerprinterImpl): AudioFingerprinter
 
+    @Binds fun acousticFeatures(impl: AcousticFeaturesImpl): AcousticFeatures
+
     @Binds fun songDeleter(impl: SongDeleterImpl): SongDeleter
 
     @Binds fun fingerprintRepository(impl: FingerprintRepositoryImpl): FingerprintRepository
