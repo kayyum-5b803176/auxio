@@ -100,6 +100,18 @@
             </intent-filter>
         </service>
 
+        <!-- Long-running acoustic seed + duplicate fingerprint scans. dataSync
+             foreground type: user-initiated, survives leaving the screen and
+             screen-off, not auto-restarted if the process dies. -->
+        <service
+            android:name=".plugin.similarity.AcousticScanService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+        <service
+            android:name=".plugin.similarity.DuplicateScanService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
         <!--
         Expose Auxio's cover data to the android system
         -->

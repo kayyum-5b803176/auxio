@@ -59,6 +59,10 @@ object IntegerTable {
     const val PLAYBACK_NOTIFICATION_CODE = 0xA0A0
     /** "Music loading" notification code */
     const val INDEXER_NOTIFICATION_CODE = 0xA0A1
+    /** "Acoustic scan" foreground service notification code */
+    const val ACOUSTIC_SCAN_NOTIFICATION_CODE = 0xA0A2
+    /** "Find duplicates" foreground service notification code */
+    const val DUPLICATE_SCAN_NOTIFICATION_CODE = 0xA0A3
     /** MainActivity Intent request code */
     const val REQUEST_CODE = 0xA0C0
     /** Activity AuxioService Start ID */

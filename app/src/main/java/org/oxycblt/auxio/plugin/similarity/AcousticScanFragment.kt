@@ -18,8 +18,13 @@
 
 package org.oxycblt.auxio.plugin.similarity
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.LayoutInflater
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import androidx.fragment.app.viewModels
 import androidx.navigation.fragment.findNavController
@@ -30,14 +35,22 @@ import org.oxycblt.auxio.ui.ViewBindingFragment
 import org.oxycblt.auxio.util.collectImmediately
 
 /**
- * Proactive whole-library acoustic seeding, with progress + per-file log.
- * Structurally identical to the Find Duplicates screen: centered progress
- * layout, true-total progress denominator, cached entries counted and logged
- * rather than hidden.
+ * Observes the acoustic-scan foreground service and lets the user start/stop it.
+ * The work runs in the service, so it continues if the user leaves this screen
+ * or the screen turns off. Opening this page does NOT auto-start a scan; the user
+ * taps the button. If a scan is already running (started earlier this session),
+ * the page shows its live progress immediately.
  */
 @AndroidEntryPoint
 class AcousticScanFragment : ViewBindingFragment<FragmentAcousticScanBinding>() {
     private val scanModel: AcousticScanViewModel by viewModels()
+
+    private val notifPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            // Regardless of grant result, proceed to start the scan. If denied,
+            // the scan still runs; only its notification won't be shown.
+            startScan()
+        }
 
     override fun onCreateBinding(inflater: LayoutInflater) =
         FragmentAcousticScanBinding.inflate(inflater)
@@ -51,38 +64,65 @@ class AcousticScanFragment : ViewBindingFragment<FragmentAcousticScanBinding>() 
         binding.acousticToolbar.setNavigationOnClickListener {
             findNavController().navigateUp()
         }
-        binding.acousticRescan.setOnClickListener { scanModel.rescan() }
+        binding.acousticRescan.setOnClickListener { requestThenScan() }
 
-        collectImmediately(scanModel.scanState) { state ->
+        collectImmediately(scanModel.state) { state ->
             when (state) {
-                is AcousticScanViewModel.ScanState.Idle -> {}
-                is AcousticScanViewModel.ScanState.Scanning -> {
+                is ScanProgress.State.Idle -> {
                     binding.acousticProgressContainer.isVisible = true
-                    binding.acousticRescan.isVisible = false
+                    binding.acousticProgress.isVisible = false
+                    binding.acousticProgressText.text =
+                        getString(R.string.set_acoustic_scan_desc)
+                    binding.acousticLog.text = ""
+                    binding.acousticRescan.isVisible = true
+                    binding.acousticRescan.text = getString(R.string.lbl_acoustic_scan_start)
+                }
+                is ScanProgress.State.Running -> {
+                    binding.acousticProgressContainer.isVisible = true
+                    binding.acousticProgress.isVisible = true
                     binding.acousticProgress.max = state.total
                     binding.acousticProgress.progress = state.done
                     binding.acousticProgressText.text =
                         getString(R.string.fmt_acoustic_progress, state.done, state.total)
+                    binding.acousticLog.text = state.log.joinToString("\n")
+                    binding.acousticRescan.isVisible = false
                 }
-                is AcousticScanViewModel.ScanState.Results -> {
+                is ScanProgress.State.Done -> {
                     binding.acousticProgressContainer.isVisible = true
                     binding.acousticProgress.isVisible = false
                     binding.acousticProgressText.text =
-                        getString(
-                            R.string.fmt_acoustic_done,
-                            state.seeded,
-                            state.cached,
-                            state.failed,
-                            state.total)
+                        if (state.stopped)
+                            getString(R.string.lbl_acoustic_stopped)
+                        else
+                            getString(
+                                R.string.fmt_acoustic_done,
+                                state.processed,
+                                state.cached,
+                                state.failed,
+                                state.total)
+                    binding.acousticLog.text = state.log.joinToString("\n")
                     binding.acousticRescan.isVisible = true
+                    binding.acousticRescan.text = getString(R.string.lbl_acoustic_rescan)
                 }
             }
         }
+    }
 
-        collectImmediately(scanModel.processingLog) { log ->
-            binding.acousticLog.text = log.joinToString("\n")
+    private fun requestThenScan() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted =
+                ContextCompat.checkSelfPermission(
+                    requireContext(), Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                return
+            }
         }
+        startScan()
+    }
 
-        scanModel.scanIfNeeded()
+    private fun startScan() {
+        AcousticScanService.start(requireContext())
     }
 }
