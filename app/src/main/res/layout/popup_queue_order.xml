@@ -130,6 +130,105 @@
     </FrameLayout>
 
     <!-- Actions -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginVertical="@dimen/spacing_small"
+        android:background="?attr/colorOutlineVariant" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingBottom="@dimen/spacing_small"
+        android:text="@string/lbl_queue_order_mix_title"
+        android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
+        android:textColor="?attr/colorPrimary" />
+
+    <!-- Metadata -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/lbl_queue_order_metadata"
+            android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
+        <TextView
+            android:id="@+id/queue_order_metadata_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.Auxio.LabelMedium"
+            android:textColor="?android:attr/textColorSecondary"
+            tools:text="0.33" />
+    </LinearLayout>
+    <com.google.android.material.slider.Slider
+        android:id="@+id/queue_order_metadata"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:stepSize="0.05"
+        android:valueFrom="0.0"
+        android:valueTo="1.0"
+        tools:ignore="SpeakableTextPresentCheck" />
+
+    <!-- Axis -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/lbl_queue_order_axis"
+            android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
+        <TextView
+            android:id="@+id/queue_order_axis_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.Auxio.LabelMedium"
+            android:textColor="?android:attr/textColorSecondary"
+            tools:text="0.34" />
+    </LinearLayout>
+    <com.google.android.material.slider.Slider
+        android:id="@+id/queue_order_axis"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:stepSize="0.05"
+        android:valueFrom="0.0"
+        android:valueTo="1.0"
+        tools:ignore="SpeakableTextPresentCheck" />
+
+    <!-- Acoustic -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/lbl_queue_order_acoustic"
+            android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
+        <TextView
+            android:id="@+id/queue_order_acoustic_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.Auxio.LabelMedium"
+            android:textColor="?android:attr/textColorSecondary"
+            tools:text="0.33" />
+    </LinearLayout>
+    <com.google.android.material.slider.Slider
+        android:id="@+id/queue_order_acoustic"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:stepSize="0.05"
+        android:valueFrom="0.0"
+        android:valueTo="1.0"
+        tools:ignore="SpeakableTextPresentCheck" />
+
+    <!-- Actions -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

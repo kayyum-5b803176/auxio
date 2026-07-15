@@ -140,6 +140,25 @@ constructor(
             pluginSettings.queueOrderRandom = value
         }
 
+    // Stage 1's composition mixture (metadata/axis/acoustic), shared-budget 0..1.
+    var queueOrderMetadata: Float
+        get() = pluginSettings.queueOrderMetadata
+        set(value) {
+            pluginSettings.queueOrderMetadata = value
+        }
+
+    var queueOrderAxis: Float
+        get() = pluginSettings.queueOrderAxis
+        set(value) {
+            pluginSettings.queueOrderAxis = value
+        }
+
+    var queueOrderAcoustic: Float
+        get() = pluginSettings.queueOrderAcoustic
+        set(value) {
+            pluginSettings.queueOrderAcoustic = value
+        }
+
     /** Load all stored relations touching [valueId] as (otherId -> relation). */
     suspend fun relationsForValue(valueId: Long): Map<Long, Float> =
         zoneAxisRepository.relationsForValue(valueId)

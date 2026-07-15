@@ -71,6 +71,9 @@ interface PluginSettings : Settings<PluginSettings.Listener> {
     var queueOrderSimilarity: Float
     var queueOrderFrequency: Float
     var queueOrderRandom: Float
+    var queueOrderMetadata: Float
+    var queueOrderAxis: Float
+    var queueOrderAcoustic: Float
 
     interface Listener {
         /** Called when [similarityDetectionEnabled] changes. */
@@ -151,6 +154,33 @@ class PluginSettingsImpl @Inject constructor(@ApplicationContext private val con
         set(value) {
             sharedPreferences.edit {
                 putFloat(getString(R.string.set_key_queue_order_random), value)
+            }
+        }
+
+    // Stage 1's composition mixture (metadata/axis/acoustic), shared-budget 0..1,
+    // defaulting to equal thirds. Axis (zone-tag relation) defaults slightly
+    // higher since it's the least sparse of the three for a brand-new song.
+    override var queueOrderMetadata: Float
+        get() = sharedPreferences.getFloat(getString(R.string.set_key_queue_order_metadata), 0.35f)
+        set(value) {
+            sharedPreferences.edit {
+                putFloat(getString(R.string.set_key_queue_order_metadata), value)
+            }
+        }
+
+    override var queueOrderAxis: Float
+        get() = sharedPreferences.getFloat(getString(R.string.set_key_queue_order_axis), 0.35f)
+        set(value) {
+            sharedPreferences.edit {
+                putFloat(getString(R.string.set_key_queue_order_axis), value)
+            }
+        }
+
+    override var queueOrderAcoustic: Float
+        get() = sharedPreferences.getFloat(getString(R.string.set_key_queue_order_acoustic), 0.30f)
+        set(value) {
+            sharedPreferences.edit {
+                putFloat(getString(R.string.set_key_queue_order_acoustic), value)
             }
         }
 

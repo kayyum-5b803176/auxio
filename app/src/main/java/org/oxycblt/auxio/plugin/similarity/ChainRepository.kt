@@ -40,7 +40,14 @@ import timber.log.Timber as L
  * most-played / more-shuffled first; negative = the mirror). Magnitudes
  * normalize into shares summing to 1 when applied.
  */
-data class QueueOrderWeights(val similarity: Float, val frequency: Float, val random: Float)
+data class QueueOrderWeights(
+    val similarity: Float,
+    val frequency: Float,
+    val random: Float,
+    val metadata: Float,
+    val axis: Float,
+    val acoustic: Float
+)
 
 interface ChainRepository {
     /**
@@ -452,23 +459,6 @@ constructor(
         val biases = zoneAxisRepository.biasByValue()
         fun bias(id: Long?): Float = id?.let { biases[it] } ?: 0f
 
-        // Directed transition graph: proven "played B after A" (transitionStrength)
-        // and "skipped B after A" (skipStrength) evidence from the CURRENT song.
-        // Both use +1 shrinkage so a handful of events isn't over-trusted. Empty
-        // when disabled. transitionStrength drives +Similarity; skipStrength drives
-        // -Similarity (actively surface historically-skipped pairs).
-        val transStrengthByKey = HashMap<String, Float>()
-        val skipStrengthByKey = HashMap<String, Float>()
-        if (pluginSettings.transitionGraphEnabled) {
-            keys[start]?.let { srcKey ->
-                for (e in transitionDao.outgoingFromNow(srcKey)) {
-                    val total = e.plays + e.skips
-                    transStrengthByKey[e.toKey] = e.plays.toFloat() / (total + 1)
-                    skipStrengthByKey[e.toKey] = e.skips.toFloat() / (total + 1)
-                }
-            }
-        }
-
         val vectorOf = { i: Int ->
             val k = keys[i]
             when {
@@ -516,9 +506,19 @@ constructor(
         // Purely ordinal — no magic-constant magnitudes competing.
         fun tagCloseness(i: Int): Float {
             val iTag = tagOf(i)
-            val typeRel = rel(curTag0?.typeValueId, iTag?.typeValueId)
-            val langRel = rel(curTag0?.languageValueId, iTag?.languageValueId)
-            val b = bias(iTag?.typeValueId) + bias(iTag?.languageValueId)
+            if (iTag?.typeValueId == null && iTag?.languageValueId == null) {
+                // No zone tag at all (e.g. a brand-new, never-tagged song). Fall
+                // back to acoustic similarity as a stand-in so it isn't stranded
+                // at a flat neutral value regardless of how it actually sounds.
+                // Scaled to roughly the same range as tag-based closeness below.
+                // Tagged songs are completely unaffected by this fallback.
+                val v = vectorOf(i)
+                val cos = if (v == null || curVec0 == null) 0f else cosine(curVec0, v)
+                return ACOUSTIC_FALLBACK_SCALE * cos
+            }
+            val typeRel = rel(curTag0?.typeValueId, iTag.typeValueId)
+            val langRel = rel(curTag0?.languageValueId, iTag.languageValueId)
+            val b = bias(iTag.typeValueId) + bias(iTag.languageValueId)
             // Type dominates (×2) so all same-Type languages rank above any other
             // Type; language orders within a Type tier; bias nudges either.
             return 2f * typeRel + langRel + BIAS_BLEND_NUDGE * b
@@ -558,20 +558,26 @@ constructor(
             if (y != null && startYear != null && y == startYear) score += META_YEAR_WEIGHT
             return score
         }
-        // Metadata sort weight is strongest at Random=-1 (tight) and ~0 at
-        // Random=+1 (wide): (1 - randV)/2 maps -1->1, 0->0.5, +1->0.
-        val metaWeight = ((1f - randV) / 2f).coerceIn(0f, 1f)
 
-        // ---- STAGE 2 (Frequency): sort survivors by play count. ----
-        // +freq: most-played first; -freq: least-played first; 0: no ordering
-        // effect (stable, deferring to Stage 1). Applied as the primary sort key
-        // scaled by |freq| so at 0 it contributes nothing.
-        // ---- STAGE 1 (Similarity): final fine-grained vector sort. ----
-        // +sim: closest vector to current first; -sim: farthest first; 0: no
-        // vector ordering (all same-scope songs equal, deferring to Stage 2).
-        // Similarity is the FINEST key, so it's applied as the tie-breaker WITHIN
-        // equal-frequency groups — but because both are continuous we combine
-        // them as a weighted sort key with Similarity dominating when |sim|>|freq|.
+        // ---- STAGE 1 (Similarity): final fine-grained sort. ----
+        // +sim: closest composite first; -sim: farthest first; 0: no ordering
+        // effect (defers to Stage 2). "Closest" is a user-controlled MIXTURE of
+        // three competing evidence sources — metadata, zone-axis relation, and
+        // acoustic sound — set by their own shared-budget sliders (0..1 each,
+        // summing to 1). Each signal is normalized to a comparable range first
+        // so the mixture weights mean what they say (a small weight can't
+        // silently dominate just because its raw numbers are bigger).
+        val metaW = w.metadata.coerceIn(0f, 1f)
+        val axisW = w.axis.coerceIn(0f, 1f)
+        val acousticW = w.acoustic.coerceIn(0f, 1f)
+        val mixSum = (metaW + axisW + acousticW).coerceAtLeast(1e-4f)
+
+        fun axisCloseness(i: Int): Float {
+            val iTag = tagOf(i)
+            val typeRel = rel(curTag0?.typeValueId, iTag?.typeValueId)
+            val langRel = rel(curTag0?.languageValueId, iTag?.languageValueId)
+            return (2f * typeRel + langRel) / 3f // normalized to -1..+1
+        }
         fun simTo(i: Int): Float {
             val v = vectorOf(i)
             return if (v == null || curVec0 == null) 0f else cosine(curVec0, v)
@@ -579,29 +585,15 @@ constructor(
         val eligibleSorted =
             eligible.sortedWith(
                 compareByDescending<Int> {
-                    val k = keys[it]
-                    val trans = k?.let { key -> transStrengthByKey[key] } ?: 0f
-                    val skip = k?.let { key -> skipStrengthByKey[key] } ?: 0f
-                    // Stage 1 (finest): similarity, merging vector proximity with
-                    // transition-graph evidence (transition weighted heavier than
-                    // cosine). +sim seeks proven PLAYS + high cosine; -sim seeks
-                    // proven SKIPS + low cosine (sign flip swaps trans->skip and
-                    // flips cosine).
-                    val simMerged =
-                        if (simV >= 0f) {
-                            SIM_TRANS_WEIGHT * trans + SIM_COS_WEIGHT * simTo(it)
-                        } else {
-                            // negative: actively surface historically-skipped +
-                            // least-similar pairs.
-                            SIM_TRANS_WEIGHT * skip + SIM_COS_WEIGHT * (1f - simTo(it))
-                        }
-                    val s = simMerged * kotlin.math.abs(simV)
+                    val metaNorm = metaCloseness(it) / META_MAX // normalized 0..1
+                    val axisNorm = axisCloseness(it) // already -1..1
+                    val acousticNorm = simTo(it) // already -1..1
+                    val combined =
+                        (metaW * metaNorm + axisW * axisNorm + acousticW * acousticNorm) / mixSum
+                    val s = combined * (if (simV >= 0) 1f else -1f) * kotlin.math.abs(simV)
                     // Stage 2: frequency sort, signed, below similarity.
                     val f = freqOf(it) * (if (freqV >= 0) 1f else -1f) * kotlin.math.abs(freqV) * STAGE2_WEIGHT
-                    // Stage 3 (metadata): cluster same album/artist/year, weighted
-                    // up as Random tightens; fades at high Random.
-                    val m = metaCloseness(it) * metaWeight
-                    s + f + m
+                    s + f
                 })
 
         // Emit, honoring the recently-played guard as a soft de-prioritizer.
@@ -633,7 +625,10 @@ constructor(
         QueueOrderWeights(
             similarity = pluginSettings.queueOrderSimilarity,
             frequency = pluginSettings.queueOrderFrequency,
-            random = pluginSettings.queueOrderRandom)
+            random = pluginSettings.queueOrderRandom,
+            metadata = pluginSettings.queueOrderMetadata,
+            axis = pluginSettings.queueOrderAxis,
+            acoustic = pluginSettings.queueOrderAcoustic)
 
     override suspend fun clear() {
         embeddingDao.nuke()
@@ -753,19 +748,20 @@ constructor(
         const val BIAS_BLEND_NUDGE = 0.3f
         const val STAGE2_WEIGHT = 0.5f
 
-        // Embedded-metadata closeness weights (album > artist > year), used by
-        // the Random stage's soft clustering. Album implies artist+era so it's
-        // strongest; shared artist across albums is looser; same year is loosest.
+        // Embedded-metadata closeness weights (album > artist > year), used as
+        // one of Stage 1's three composition signals. Album implies artist+era
+        // so it's strongest; shared artist across albums is looser; same year
+        // is loosest. META_MAX is the max possible sum, used to normalize to 0..1.
         const val META_ALBUM_WEIGHT = 0.6f
         const val META_ARTIST_WEIGHT = 0.4f
         const val META_YEAR_WEIGHT = 0.2f
+        const val META_MAX = META_ALBUM_WEIGHT + META_ARTIST_WEIGHT + META_YEAR_WEIGHT
 
-        // Stage 1 Similarity merges transition-graph evidence with vector cosine,
-        // transition weighted heavier (proven habit beats raw vector proximity
-        // when they disagree). Used for both +sim (plays/high-cosine) and -sim
-        // (skips/low-cosine).
-        const val SIM_TRANS_WEIGHT = 0.7f
-        const val SIM_COS_WEIGHT = 0.3f
+        // Stage 3 fallback: for a song with NO zone tag at all, this scales
+        // acoustic cosine (-1..1) to roughly the same range as tag-based
+        // closeness (2*typeRel + langRel, up to ±3) so it lands in a believable
+        // middle tier rather than a flat neutral 0.
+        const val ACOUSTIC_FALLBACK_SCALE = 2.0f
 
         // Within-ring ordering weight for proven transition strength. On the same
         // scale as the other within-ring signals (well below RING_SCALE) so it

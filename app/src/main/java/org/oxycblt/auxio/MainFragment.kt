@@ -301,10 +301,59 @@ class MainFragment :
             R.id.queue_order_frequency_value)
         val randValue = view.findViewById<android.widget.TextView>(
             R.id.queue_order_random_value)
+        val metaSlider = view.findViewById<com.google.android.material.slider.Slider>(
+            R.id.queue_order_metadata)
+        val axisSlider = view.findViewById<com.google.android.material.slider.Slider>(
+            R.id.queue_order_axis)
+        val acousticSlider = view.findViewById<com.google.android.material.slider.Slider>(
+            R.id.queue_order_acoustic)
+        val metaValue = view.findViewById<android.widget.TextView>(
+            R.id.queue_order_metadata_value)
+        val axisValue = view.findViewById<android.widget.TextView>(
+            R.id.queue_order_axis_value)
+        val acousticValue = view.findViewById<android.widget.TextView>(
+            R.id.queue_order_acoustic_value)
 
         fun bind(slider: com.google.android.material.slider.Slider, label: android.widget.TextView) {
             label.text = "%+.2f".format(slider.value)
             slider.addOnChangeListener { _, v, _ -> label.text = "%+.2f".format(v) }
+        }
+        fun bindMix(slider: com.google.android.material.slider.Slider, label: android.widget.TextView) {
+            label.text = "%.2f".format(slider.value)
+            slider.addOnChangeListener { _, v, _ -> label.text = "%.2f".format(v) }
+        }
+        // Shared-budget rebalancing: metadata/axis/acoustic are competing shares
+        // of ONE mixture (must sum to ~1), unlike the three sliders above (which
+        // are independent axes and deliberately do NOT couple). Moving one here
+        // proportionally rescales the other two so the total stays 1 - only
+        // reacts to USER drags (fromUser) to avoid feedback loops when we set
+        // values programmatically below.
+        fun rebalance(
+            changed: com.google.android.material.slider.Slider,
+            a: com.google.android.material.slider.Slider,
+            b: com.google.android.material.slider.Slider
+        ) {
+            // Snap to the slider's step grid (0.05) — Material Slider crashes if a
+            // programmatically set value isn't valueFrom + a multiple of stepSize.
+            fun snap(v: Float) = (Math.round(v / 0.05f) * 0.05f).coerceIn(0f, 1f)
+            val remaining = (1f - changed.value).coerceIn(0f, 1f)
+            val abSum = a.value + b.value
+            if (abSum > 1e-4f) {
+                a.value = snap(remaining * (a.value / abSum))
+                b.value = snap(remaining * (b.value / abSum))
+            } else {
+                a.value = snap(remaining / 2f)
+                b.value = snap(remaining / 2f)
+            }
+        }
+        metaSlider.addOnChangeListener { slider, _, fromUser ->
+            if (fromUser) rebalance(slider, axisSlider, acousticSlider)
+        }
+        axisSlider.addOnChangeListener { slider, _, fromUser ->
+            if (fromUser) rebalance(slider, metaSlider, acousticSlider)
+        }
+        acousticSlider.addOnChangeListener { slider, _, fromUser ->
+            if (fromUser) rebalance(slider, metaSlider, axisSlider)
         }
         // Seed from persisted values (local until Apply).
         simSlider.value = zoneModel.queueOrderSimilarity.coerceIn(-1f, 1f)
@@ -313,6 +362,14 @@ class MainFragment :
         bind(simSlider, simValue)
         bind(freqSlider, freqValue)
         bind(randSlider, randValue)
+
+        fun snap05(v: Float) = (Math.round(v / 0.05f) * 0.05f).coerceIn(0f, 1f)
+        metaSlider.value = snap05(zoneModel.queueOrderMetadata)
+        axisSlider.value = snap05(zoneModel.queueOrderAxis)
+        acousticSlider.value = snap05(zoneModel.queueOrderAcoustic)
+        bindMix(metaSlider, metaValue)
+        bindMix(axisSlider, axisValue)
+        bindMix(acousticSlider, acousticValue)
 
         val width =
             requireBinding().queueSheet.width.takeIf { it > 0 }
@@ -324,11 +381,17 @@ class MainFragment :
             simSlider.value = 0f
             freqSlider.value = 0f
             randSlider.value = 0f
+            metaSlider.value = 0.35f
+            axisSlider.value = 0.35f
+            acousticSlider.value = 0.30f
         }
         view.findViewById<View>(R.id.queue_order_apply).setOnClickListener {
             zoneModel.queueOrderSimilarity = simSlider.value
             zoneModel.queueOrderFrequency = freqSlider.value
             zoneModel.queueOrderRandom = randSlider.value
+            zoneModel.queueOrderMetadata = metaSlider.value
+            zoneModel.queueOrderAxis = axisSlider.value
+            zoneModel.queueOrderAcoustic = acousticSlider.value
             playbackModel.reapplyChainOrder()
             popup.dismiss()
         }

@@ -140,6 +140,10 @@
     <string name="lbl_queue_order_similarity">Similarity (−least / +most similar)</string>
     <string name="lbl_queue_order_frequency">Frequency (−least / +most played)</string>
     <string name="lbl_queue_order_random">Random (−fixed / +shuffled)</string>
+    <string name="lbl_queue_order_mix_title">Similarity composition</string>
+    <string name="lbl_queue_order_metadata">Metadata (artist / album / year)</string>
+    <string name="lbl_queue_order_axis">Zone axis (type / language)</string>
+    <string name="lbl_queue_order_acoustic">Acoustic (how it sounds)</string>
     <string name="lbl_queue_order_apply">Apply</string>
     <string name="lbl_queue_order_reset">Reset</string>
     <string name="lbl_zone_pos_header">Position on this axis</string>
