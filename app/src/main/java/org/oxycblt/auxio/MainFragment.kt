@@ -106,6 +106,22 @@ class MainFragment :
     private var lastInsets: WindowInsets? = null
     private var elevationNormal = 0f
     private var normalCornerSize = 0f
+    // Caches of the last-applied value for EVERY render-affecting property
+    // onPreDraw touches. Android's View property setters (alpha, translationZ)
+    // and several Drawable setters invalidate and force a GPU re-render on
+    // EVERY assignment call, regardless of whether the new value actually
+    // differs from the current one - since onPreDraw runs every single frame,
+    // unconditionally reassigning any of these recreates a self-perpetuating
+    // render loop even when nothing is actually changing. Guarding each with
+    // "only set if changed" is what actually breaks that loop.
+    private var lastQueueSheetTopRightCorner: Float? = null
+    private var lastMainSheetScrimAlpha: Float? = null
+    private var lastPlaybackCornerSize: Float? = null
+    private var lastPlaybackTranslationZ: Float? = null
+    private var lastPlaybackBarAlpha: Float? = null
+    private var lastPlaybackPanelAlpha: Float? = null
+    private var lastQueueFragmentAlpha: Float? = null
+    private var lastQueueSheetAlpha: Float? = null
     private var maxScaleXDistance = 0f
     private var sheetRising: Boolean? = null
     @Inject lateinit var uiSettings: UISettings
@@ -520,12 +536,22 @@ class MainFragment :
         val playbackBackRatio =
             max(1 - ((1 - binding.playbackSheet.scaleX) / playbackMaxXScaleDelta), 0f)
         val playbackLastStretchRatio = min(playbackEdgeRatio * playbackBackRatio, 1f)
-        binding.mainSheetScrim.alpha = playbackLastStretchRatio
+        if (playbackLastStretchRatio != lastMainSheetScrimAlpha) {
+            lastMainSheetScrimAlpha = playbackLastStretchRatio
+            binding.mainSheetScrim.alpha = playbackLastStretchRatio
+        }
 
-        playbackSheetBehavior.sheetBackgroundDrawable.setCornerSize(
-            normalCornerSize * (1 - playbackLastStretchRatio))
+        val newPlaybackCornerSize = normalCornerSize * (1 - playbackLastStretchRatio)
+        if (newPlaybackCornerSize != lastPlaybackCornerSize) {
+            lastPlaybackCornerSize = newPlaybackCornerSize
+            playbackSheetBehavior.sheetBackgroundDrawable.setCornerSize(newPlaybackCornerSize)
+        }
         binding.exploreNavHost.isInvisible = playbackLastStretchRatio == 1f
-        binding.playbackSheet.translationZ = (1 - playbackLastStretchRatio) * elevationNormal
+        val newPlaybackTranslationZ = (1 - playbackLastStretchRatio) * elevationNormal
+        if (newPlaybackTranslationZ != lastPlaybackTranslationZ) {
+            lastPlaybackTranslationZ = newPlaybackTranslationZ
+            binding.playbackSheet.translationZ = newPlaybackTranslationZ
+        }
 
         if (queueSheetBehavior != null) {
             val queueRatio = max(queueSheetBehavior.calculateSlideOffset(), 0f)
@@ -545,9 +571,20 @@ class MainFragment :
             val queuePanelBackRatio = min(queueBackRatio * 2, 1f)
             val queuePanelRatio = 1 - min(queuePanelEdgeRatio * queuePanelBackRatio, 1f)
 
-            binding.playbackBarFragment.alpha = max(playbackOutRatio, queueBarRatio)
-            binding.playbackPanelFragment.alpha = min(playbackInRatio, queuePanelRatio)
-            binding.queueFragment.alpha = queueInRatio
+            val newBarAlpha = max(playbackOutRatio, queueBarRatio)
+            if (newBarAlpha != lastPlaybackBarAlpha) {
+                lastPlaybackBarAlpha = newBarAlpha
+                binding.playbackBarFragment.alpha = newBarAlpha
+            }
+            val newPanelAlpha = min(playbackInRatio, queuePanelRatio)
+            if (newPanelAlpha != lastPlaybackPanelAlpha) {
+                lastPlaybackPanelAlpha = newPanelAlpha
+                binding.playbackPanelFragment.alpha = newPanelAlpha
+            }
+            if (queueInRatio != lastQueueFragmentAlpha) {
+                lastQueueFragmentAlpha = queueInRatio
+                binding.queueFragment.alpha = queueInRatio
+            }
 
             if (playbackModel.song.value != null) {
                 // Playback sheet intercepts queue sheet touch events, prevent that from
@@ -557,13 +594,23 @@ class MainFragment :
             }
         } else {
             // No queue sheet, fade normally based on the playback sheet
-            binding.playbackBarFragment.alpha = playbackOutRatio
-            binding.playbackPanelFragment.alpha = playbackInRatio
-            (binding.queueSheet.background as MaterialShapeDrawable).shapeAppearanceModel =
-                ShapeAppearanceModel.builder()
-                    .setTopLeftCornerSize(normalCornerSize)
-                    .setTopRightCornerSize(normalCornerSize * (1 - playbackLastStretchRatio))
-                    .build()
+            if (playbackOutRatio != lastPlaybackBarAlpha) {
+                lastPlaybackBarAlpha = playbackOutRatio
+                binding.playbackBarFragment.alpha = playbackOutRatio
+            }
+            if (playbackInRatio != lastPlaybackPanelAlpha) {
+                lastPlaybackPanelAlpha = playbackInRatio
+                binding.playbackPanelFragment.alpha = playbackInRatio
+            }
+            val newTopRightCorner = normalCornerSize * (1 - playbackLastStretchRatio)
+            if (newTopRightCorner != lastQueueSheetTopRightCorner) {
+                lastQueueSheetTopRightCorner = newTopRightCorner
+                (binding.queueSheet.background as MaterialShapeDrawable).shapeAppearanceModel =
+                    ShapeAppearanceModel.builder()
+                        .setTopLeftCornerSize(normalCornerSize)
+                        .setTopRightCornerSize(newTopRightCorner)
+                        .build()
+            }
         }
         // Fade out the playback bar as the panel expands.
         binding.playbackBarFragment.apply {
@@ -576,7 +623,10 @@ class MainFragment :
 
         binding.queueSheet.apply {
             // Queue sheet (not queue content) should fade out with the playback panel.
-            alpha = playbackInRatio
+            if (playbackInRatio != lastQueueSheetAlpha) {
+                lastQueueSheetAlpha = playbackInRatio
+                alpha = playbackInRatio
+            }
             // Prevent interactions when the queue sheet fully fades out.
             binding.queueSheet.isInvisible = alpha == 0f
         }

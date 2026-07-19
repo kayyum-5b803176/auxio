@@ -65,9 +65,9 @@ class PlaybackBarFragment : ViewBindingFragment<FragmentPlaybackBarBinding>() {
             }
         }
 
-        // Set up marquee on song information
-        binding.playbackSong.isSelected = true
-        binding.playbackInfo.isSelected = true
+        // Marquee on song information is now driven by updatePlaying() below
+        // (isSelected tracks isPlaying), not set unconditionally here - see
+        // that function for why.
 
         // Set up actions
         binding.playbackPlayPause.setOnClickListener { playbackModel.togglePlaying() }
@@ -110,6 +110,15 @@ class PlaybackBarFragment : ViewBindingFragment<FragmentPlaybackBarBinding>() {
 
     private fun updatePlaying(isPlaying: Boolean) {
         requireBinding().playbackPlayPause.isActivated = isPlaying
+        // Marquee (isSelected=true) drives a continuous, self-perpetuating
+        // scroll animation for as long as it's set - previously this was set
+        // once, permanently, at bind time, regardless of whether a song was
+        // even playing. That kept the text continuously animating (and
+        // continuously requesting redraws) for the Fragment's ENTIRE
+        // lifetime. Only animate while genuinely playing; paused text just
+        // stops scrolling where it is, matching most media players.
+        requireBinding().playbackSong.isSelected = isPlaying
+        requireBinding().playbackInfo.isSelected = isPlaying
     }
 
     private fun updatePosition(positionDs: Long) {

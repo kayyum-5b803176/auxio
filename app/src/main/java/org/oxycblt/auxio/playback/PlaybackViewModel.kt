@@ -172,7 +172,12 @@ constructor(
         lastPositionJob?.cancel()
         lastPositionJob =
             viewModelScope.launch {
-                while (true) {
+                // Only tick while actually playing — previously this looped
+                // unconditionally forever (10x/second) even while paused, since
+                // nothing here checked isPlaying; it only ever got replaced on
+                // the NEXT progression change. That wasted continuous CPU
+                // whenever the app was foregrounded with playback paused.
+                while (progression.isPlaying) {
                     val posMs = progression.calculateElapsedPositionMs()
                     _positionDs.value = posMs.msToDs()
                     // Feed the live position to the Smart Chain tracker so the
