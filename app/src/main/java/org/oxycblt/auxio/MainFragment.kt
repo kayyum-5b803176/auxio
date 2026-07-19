@@ -137,6 +137,24 @@ class MainFragment :
     override fun onBindingCreated(binding: FragmentMainBinding, savedInstanceState: Bundle?) {
         super.onBindingCreated(binding, savedInstanceState)
 
+        // This Fragment INSTANCE persists across navigation (e.g. to Settings
+        // and back), but its VIEW/binding gets destroyed and recreated each
+        // time - a fresh view starts with default properties (alpha=1, etc.),
+        // but the cache fields above are on the Fragment instance, so they'd
+        // otherwise survive with STALE values from the old view. That made
+        // onPreDraw's "skip if unchanged" guards wrongly skip re-applying the
+        // correct value against a fresh view that never actually had it set -
+        // causing the mini-player/panel overlap glitch. Reset every cache so
+        // the first onPreDraw against this fresh binding always applies.
+        lastQueueSheetTopRightCorner = null
+        lastMainSheetScrimAlpha = null
+        lastPlaybackCornerSize = null
+        lastPlaybackTranslationZ = null
+        lastPlaybackBarAlpha = null
+        lastPlaybackPanelAlpha = null
+        lastQueueFragmentAlpha = null
+        lastQueueSheetAlpha = null
+
         val playbackSheetBehavior =
             binding.playbackSheet.coordinatorLayoutBehavior as PlaybackBottomSheetBehavior
         playbackSheetBehavior.uiSettings = uiSettings
