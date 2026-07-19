@@ -129,7 +129,52 @@
             tools:ignore="SpeakableTextPresentCheck" />
     </FrameLayout>
 
-    <!-- Actions -->
+    <!-- Axis <-> Metadata -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginVertical="@dimen/spacing_small"
+        android:background="?attr/colorOutlineVariant" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/lbl_queue_order_axis_metadata"
+            android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
+        <TextView
+            android:id="@+id/queue_order_axis_metadata_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.Auxio.LabelMedium"
+            android:textColor="?android:attr/textColorSecondary"
+            tools:text="+0.00" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <View
+            android:layout_width="1dp"
+            android:layout_height="12dp"
+            android:layout_gravity="center"
+            android:background="?attr/colorOutline" />
+        <com.google.android.material.slider.Slider
+            android:id="@+id/queue_order_axis_metadata"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:stepSize="0.1"
+            android:value="0.0"
+            android:valueFrom="-1.0"
+            android:valueTo="1.0"
+            tools:ignore="SpeakableTextPresentCheck" />
+    </FrameLayout>
+
+    <!-- Type / Language filters -->
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
@@ -140,93 +185,34 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:paddingBottom="@dimen/spacing_small"
-        android:text="@string/lbl_queue_order_mix_title"
+        android:text="@string/lbl_queue_order_filters_title"
         android:textAppearance="@style/TextAppearance.Auxio.LabelLarge"
         android:textColor="?attr/colorPrimary" />
 
-    <!-- Metadata -->
-    <LinearLayout
+    <com.google.android.material.textfield.TextInputLayout
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal">
-        <TextView
-            android:layout_width="0dp"
+        android:layout_marginBottom="@dimen/spacing_small"
+        android:hint="@string/lbl_queue_order_type_filter">
+        <AutoCompleteTextView
+            android:id="@+id/queue_order_type_filter"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/lbl_queue_order_metadata"
-            android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
-        <TextView
-            android:id="@+id/queue_order_metadata_value"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="@style/TextAppearance.Auxio.LabelMedium"
-            android:textColor="?android:attr/textColorSecondary"
-            tools:text="0.33" />
-    </LinearLayout>
-    <com.google.android.material.slider.Slider
-        android:id="@+id/queue_order_metadata"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:stepSize="0.05"
-        android:valueFrom="0.0"
-        android:valueTo="1.0"
-        tools:ignore="SpeakableTextPresentCheck" />
+            android:inputType="none" />
+    </com.google.android.material.textfield.TextInputLayout>
 
-    <!-- Axis -->
-    <LinearLayout
+    <com.google.android.material.textfield.TextInputLayout
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal">
-        <TextView
-            android:layout_width="0dp"
+        android:hint="@string/lbl_queue_order_language_filter">
+        <AutoCompleteTextView
+            android:id="@+id/queue_order_language_filter"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/lbl_queue_order_axis"
-            android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
-        <TextView
-            android:id="@+id/queue_order_axis_value"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="@style/TextAppearance.Auxio.LabelMedium"
-            android:textColor="?android:attr/textColorSecondary"
-            tools:text="0.34" />
-    </LinearLayout>
-    <com.google.android.material.slider.Slider
-        android:id="@+id/queue_order_axis"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:stepSize="0.05"
-        android:valueFrom="0.0"
-        android:valueTo="1.0"
-        tools:ignore="SpeakableTextPresentCheck" />
-
-    <!-- Acoustic -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal">
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/lbl_queue_order_acoustic"
-            android:textAppearance="@style/TextAppearance.Auxio.BodyMedium" />
-        <TextView
-            android:id="@+id/queue_order_acoustic_value"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="@style/TextAppearance.Auxio.LabelMedium"
-            android:textColor="?android:attr/textColorSecondary"
-            tools:text="0.33" />
-    </LinearLayout>
-    <com.google.android.material.slider.Slider
-        android:id="@+id/queue_order_acoustic"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:stepSize="0.05"
-        android:valueFrom="0.0"
-        android:valueTo="1.0"
-        tools:ignore="SpeakableTextPresentCheck" />
+            android:inputType="none" />
+    </com.google.android.material.textfield.TextInputLayout>
 
     <!-- Actions -->
     <LinearLayout

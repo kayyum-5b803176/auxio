@@ -140,23 +140,25 @@ constructor(
             pluginSettings.queueOrderRandom = value
         }
 
-    // Stage 1's composition mixture (metadata/axis/acoustic), shared-budget 0..1.
-    var queueOrderMetadata: Float
-        get() = pluginSettings.queueOrderMetadata
+    // Axis<->Metadata: ONE dial, 0=equal, +1=pure axis, -1=pure metadata.
+    var queueOrderAxisMetadata: Float
+        get() = pluginSettings.queueOrderAxisMetadata
         set(value) {
-            pluginSettings.queueOrderMetadata = value
+            pluginSettings.queueOrderAxisMetadata = value
         }
 
-    var queueOrderAxis: Float
-        get() = pluginSettings.queueOrderAxis
+    // Hard scope filters (null = "Any"). Reuses the existing typeValues/
+    // languageValues StateFlows above for the filter dropdown's option list.
+    var queueOrderTypeFilterId: Long?
+        get() = pluginSettings.queueOrderTypeFilterId
         set(value) {
-            pluginSettings.queueOrderAxis = value
+            pluginSettings.queueOrderTypeFilterId = value
         }
 
-    var queueOrderAcoustic: Float
-        get() = pluginSettings.queueOrderAcoustic
+    var queueOrderLanguageFilterId: Long?
+        get() = pluginSettings.queueOrderLanguageFilterId
         set(value) {
-            pluginSettings.queueOrderAcoustic = value
+            pluginSettings.queueOrderLanguageFilterId = value
         }
 
     /** Load all stored relations touching [valueId] as (otherId -> relation). */

@@ -44,9 +44,9 @@ data class QueueOrderWeights(
     val similarity: Float,
     val frequency: Float,
     val random: Float,
-    val metadata: Float,
-    val axis: Float,
-    val acoustic: Float
+    val axisMetadata: Float,
+    val typeFilterId: Long?,
+    val languageFilterId: Long?
 )
 
 interface ChainRepository {
@@ -459,6 +459,22 @@ constructor(
         val biases = zoneAxisRepository.biasByValue()
         fun bias(id: Long?): Float = id?.let { biases[it] } ?: 0f
 
+        // Directed transition graph: proven "played B after A" (transStrength)
+        // and "skipped B after A" (skipStrength) evidence from the CURRENT song.
+        // Used by Frequency's adaptive fallback: proven pair-specific history when
+        // it exists, else general play count. Empty when transitions disabled.
+        val transStrengthByKey = HashMap<String, Float>()
+        val skipStrengthByKey = HashMap<String, Float>()
+        if (pluginSettings.transitionGraphEnabled) {
+            keys[start]?.let { srcKey ->
+                for (e in transitionDao.outgoingFromNow(srcKey)) {
+                    val total = e.plays + e.skips
+                    transStrengthByKey[e.toKey] = e.plays.toFloat() / (total + 1)
+                    skipStrengthByKey[e.toKey] = e.skips.toFloat() / (total + 1)
+                }
+            }
+        }
+
         val vectorOf = { i: Int ->
             val k = keys[i]
             when {
@@ -496,22 +512,32 @@ constructor(
         val curTag0 = tagOf(start)
         val curVec0 = vectorOf(start)
 
-        // ---- STAGE 3 (Random): admit tag-groups by RANKED DEPTH. ----
+        // ---- STAGE 3 (Random): admit tag-groups by RANKED DEPTH, honoring any ----
+        // ---- hard Type/Language filters. ----
         // Instead of an additive threshold, rank every candidate by tag closeness
-        // to the current song (Type tier first, then Language within it, with bias
-        // pulling loved/understood tags closer), then admit the closest fraction
-        // of that ranked list. Random sets the DEPTH: -1 admits only the single
-        // closest group (exact Type+Language), moving toward + opens the next-
-        // closest language, then next, then the next Type tier, ... +1 admits all.
-        // Purely ordinal — no magic-constant magnitudes competing.
+        // to the current song, then admit the closest fraction. Random sets the
+        // DEPTH: -1 admits only the single closest group, +1 admits all.
+        // A SET filter (not "Any") hard-locks that axis to one specific value —
+        // ranked-depth then only varies the OTHER, unfiltered axis. This exists
+        // because the ranked-depth formula always weights Type over Language, so
+        // "any Type, but Language must be X" is NOT reachable by Random alone —
+        // it needs an explicit filter, not just a slider position.
+        val typeFilterId = w.typeFilterId
+        val languageFilterId = w.languageFilterId
+
+        fun passesFilters(i: Int): Boolean {
+            val iTag = tagOf(i)
+            if (typeFilterId != null && iTag?.typeValueId != typeFilterId) return false
+            if (languageFilterId != null && iTag?.languageValueId != languageFilterId) return false
+            return true
+        }
+
         fun tagCloseness(i: Int): Float {
             val iTag = tagOf(i)
             if (iTag?.typeValueId == null && iTag?.languageValueId == null) {
                 // No zone tag at all (e.g. a brand-new, never-tagged song). Fall
                 // back to acoustic similarity as a stand-in so it isn't stranded
                 // at a flat neutral value regardless of how it actually sounds.
-                // Scaled to roughly the same range as tag-based closeness below.
-                // Tagged songs are completely unaffected by this fallback.
                 val v = vectorOf(i)
                 val cos = if (v == null || curVec0 == null) 0f else cosine(curVec0, v)
                 return ACOUSTIC_FALLBACK_SCALE * cos
@@ -519,11 +545,21 @@ constructor(
             val typeRel = rel(curTag0?.typeValueId, iTag.typeValueId)
             val langRel = rel(curTag0?.languageValueId, iTag.languageValueId)
             val b = bias(iTag.typeValueId) + bias(iTag.languageValueId)
-            // Type dominates (×2) so all same-Type languages rank above any other
-            // Type; language orders within a Type tier; bias nudges either.
-            return 2f * typeRel + langRel + BIAS_BLEND_NUDGE * b
+            return when {
+                // Both axes locked: everyone left already matches exactly on both;
+                // ranking between them is moot, Random has nothing left to do.
+                typeFilterId != null && languageFilterId != null -> 0f
+                // Type locked: only Language varies, so rank by Language alone.
+                typeFilterId != null -> langRel + BIAS_BLEND_NUDGE * b
+                // Language locked: only Type varies, so rank by Type alone.
+                languageFilterId != null -> 2f * typeRel + BIAS_BLEND_NUDGE * b
+                // Neither locked: original Type-dominant hierarchy.
+                else -> 2f * typeRel + langRel + BIAS_BLEND_NUDGE * b
+            }
         }
-        val candidates = (0 until n).filter { !used[it] }
+        val filtered = (0 until n).filter { !used[it] && passesFilters(it) }
+        // Never strand the queue if a filter combination matches nothing.
+        val candidates = if (filtered.isEmpty()) (0 until n).filter { !used[it] } else filtered
         // Rank closest -> farthest.
         val rankedByCloseness = candidates.sortedByDescending { tagCloseness(it) }
         // Depth fraction: randV -1 -> 0 (only rank 0), +1 -> 1 (all).
@@ -541,10 +577,8 @@ constructor(
         if (eligible.isEmpty()) eligible.addAll(candidates)
 
         // Embedded-metadata closeness to the current song (album > artist > year).
-        // Random ALSO tightens this: at low Random the metadata gradient is
-        // weighted heavily (same album/artist/era cluster to the front); at high
-        // Random it fades so the queue spreads across metadata. Soft sort, never
-        // a filter — nothing is excluded on metadata grounds.
+        // This is now purely a Stage 1 fine-sort input (see below) — it no longer
+        // ties its strength to Random.
         val startSong = heap[start]
         val startAlbumUid = startSong.album.uid
         val startArtistUids = startSong.artists.map { it.uid }.toHashSet()
@@ -559,19 +593,12 @@ constructor(
             return score
         }
 
-        // ---- STAGE 1 (Similarity): final fine-grained sort. ----
-        // +sim: closest composite first; -sim: farthest first; 0: no ordering
-        // effect (defers to Stage 2). "Closest" is a user-controlled MIXTURE of
-        // three competing evidence sources — metadata, zone-axis relation, and
-        // acoustic sound — set by their own shared-budget sliders (0..1 each,
-        // summing to 1). Each signal is normalized to a comparable range first
-        // so the mixture weights mean what they say (a small weight can't
-        // silently dominate just because its raw numbers are bigger).
-        val metaW = w.metadata.coerceIn(0f, 1f)
-        val axisW = w.axis.coerceIn(0f, 1f)
-        val acousticW = w.acoustic.coerceIn(0f, 1f)
-        val mixSum = (metaW + axisW + acousticW).coerceAtLeast(1e-4f)
-
+        // ---- STAGE 1 (fine-sort): Similarity fades between STRUCTURED signals ----
+        // ---- (Frequency + Axis/Metadata) and PURE ACOUSTIC. ----
+        // +sim/-sim direction picks close-vector-first vs far-vector-first.
+        // |sim| is a FADE: at 0, order is fully Frequency+Axis/Metadata (today's
+        // structured signals); as |sim| rises, acoustic progressively SURPASSES
+        // them; at +/-1, order is PURELY acoustic. Continuous, no cliff.
         fun axisCloseness(i: Int): Float {
             val iTag = tagOf(i)
             val typeRel = rel(curTag0?.typeValueId, iTag?.typeValueId)
@@ -582,18 +609,34 @@ constructor(
             val v = vectorOf(i)
             return if (v == null || curVec0 == null) 0f else cosine(curVec0, v)
         }
+        // Axis<->Metadata: ONE dial, 0=equal, +1=pure axis, -1=pure metadata.
+        val axisMetaDial = w.axisMetadata.coerceIn(-1f, 1f)
+        val axisShare = (axisMetaDial + 1f) / 2f // 0..1
+        val metaShare = 1f - axisShare
+
+        // Frequency: proven transition/skip strength for THIS pair if it exists,
+        // else general play count — never a fixed blend, so a sparse pair falls
+        // back cleanly instead of wasting weight on data that isn't there.
+        fun freqContribution(i: Int): Float {
+            val k = keys[i]
+            return if (freqV >= 0f) {
+                val trans = k?.let { transStrengthByKey[it] }
+                (trans ?: freqOf(i)) * freqV
+            } else {
+                val skip = k?.let { skipStrengthByKey[it] }
+                (skip ?: (1f - freqOf(i))) * (-freqV)
+            }
+        }
+
+        val fade = kotlin.math.abs(simV)
         val eligibleSorted =
             eligible.sortedWith(
                 compareByDescending<Int> {
-                    val metaNorm = metaCloseness(it) / META_MAX // normalized 0..1
-                    val axisNorm = axisCloseness(it) // already -1..1
-                    val acousticNorm = simTo(it) // already -1..1
-                    val combined =
-                        (metaW * metaNorm + axisW * axisNorm + acousticW * acousticNorm) / mixSum
-                    val s = combined * (if (simV >= 0) 1f else -1f) * kotlin.math.abs(simV)
-                    // Stage 2: frequency sort, signed, below similarity.
-                    val f = freqOf(it) * (if (freqV >= 0) 1f else -1f) * kotlin.math.abs(freqV) * STAGE2_WEIGHT
-                    s + f
+                    val axisMetaContrib =
+                        axisShare * axisCloseness(it) + metaShare * (metaCloseness(it) / META_MAX)
+                    val structured = freqContribution(it) * STAGE2_WEIGHT + axisMetaContrib
+                    val acoustic = simTo(it) * (if (simV >= 0f) 1f else -1f)
+                    (1f - fade) * structured + fade * acoustic
                 })
 
         // Emit, honoring the recently-played guard as a soft de-prioritizer.
@@ -626,9 +669,9 @@ constructor(
             similarity = pluginSettings.queueOrderSimilarity,
             frequency = pluginSettings.queueOrderFrequency,
             random = pluginSettings.queueOrderRandom,
-            metadata = pluginSettings.queueOrderMetadata,
-            axis = pluginSettings.queueOrderAxis,
-            acoustic = pluginSettings.queueOrderAcoustic)
+            axisMetadata = pluginSettings.queueOrderAxisMetadata,
+            typeFilterId = pluginSettings.queueOrderTypeFilterId,
+            languageFilterId = pluginSettings.queueOrderLanguageFilterId)
 
     override suspend fun clear() {
         embeddingDao.nuke()

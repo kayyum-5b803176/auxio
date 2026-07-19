@@ -67,13 +67,15 @@ interface PluginSettings : Settings<PluginSettings.Listener> {
     /** Whether the directed transition-graph learning + log + ordering is on. */
     val transitionGraphEnabled: Boolean
 
-    /** Queue-order sliders, -1f..+1f each (within-ring blend). Persisted. */
+    /** Queue-order sliders, -1f..+1f each. Persisted. */
     var queueOrderSimilarity: Float
     var queueOrderFrequency: Float
     var queueOrderRandom: Float
-    var queueOrderMetadata: Float
-    var queueOrderAxis: Float
-    var queueOrderAcoustic: Float
+    /** Axis<->Metadata dial: 0=equal, +1=pure axis, -1=pure metadata. */
+    var queueOrderAxisMetadata: Float
+    /** Hard scope filters. null = "Any" (Random's ranked-depth governs that axis). */
+    var queueOrderTypeFilterId: Long?
+    var queueOrderLanguageFilterId: Long?
 
     interface Listener {
         /** Called when [similarityDetectionEnabled] changes. */
@@ -157,30 +159,38 @@ class PluginSettingsImpl @Inject constructor(@ApplicationContext private val con
             }
         }
 
-    // Stage 1's composition mixture (metadata/axis/acoustic), shared-budget 0..1,
-    // defaulting to equal thirds. Axis (zone-tag relation) defaults slightly
-    // higher since it's the least sparse of the three for a brand-new song.
-    override var queueOrderMetadata: Float
-        get() = sharedPreferences.getFloat(getString(R.string.set_key_queue_order_metadata), 0.35f)
+    // Axis<->Metadata: ONE dial, default 0 (equal preference between the two).
+    override var queueOrderAxisMetadata: Float
+        get() = sharedPreferences.getFloat(getString(R.string.set_key_queue_order_axis_metadata), 0f)
         set(value) {
             sharedPreferences.edit {
-                putFloat(getString(R.string.set_key_queue_order_metadata), value)
+                putFloat(getString(R.string.set_key_queue_order_axis_metadata), value)
             }
         }
 
-    override var queueOrderAxis: Float
-        get() = sharedPreferences.getFloat(getString(R.string.set_key_queue_order_axis), 0.35f)
+    // Hard scope filters. SharedPreferences has no nullable Long, so -1L is the
+    // sentinel for "Any" (no real ZoneAxisValue id is ever <= 0, ids autogenerate
+    // starting at 1).
+    override var queueOrderTypeFilterId: Long?
+        get() {
+            val v = sharedPreferences.getLong(getString(R.string.set_key_queue_order_type_filter), -1L)
+            return if (v <= 0L) null else v
+        }
         set(value) {
             sharedPreferences.edit {
-                putFloat(getString(R.string.set_key_queue_order_axis), value)
+                putLong(getString(R.string.set_key_queue_order_type_filter), value ?: -1L)
             }
         }
 
-    override var queueOrderAcoustic: Float
-        get() = sharedPreferences.getFloat(getString(R.string.set_key_queue_order_acoustic), 0.30f)
+    override var queueOrderLanguageFilterId: Long?
+        get() {
+            val v =
+                sharedPreferences.getLong(getString(R.string.set_key_queue_order_language_filter), -1L)
+            return if (v <= 0L) null else v
+        }
         set(value) {
             sharedPreferences.edit {
-                putFloat(getString(R.string.set_key_queue_order_acoustic), value)
+                putLong(getString(R.string.set_key_queue_order_language_filter), value ?: -1L)
             }
         }
 
