@@ -53,6 +53,7 @@ android {
                 includeInApk = false
                 includeInBundle = false
             }
+            signingConfig signingConfigs.debug
         }
     }
 
