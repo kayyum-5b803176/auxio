@@ -177,13 +177,26 @@ constructor(
                 // nothing here checked isPlaying; it only ever got replaced on
                 // the NEXT progression change. That wasted continuous CPU
                 // whenever the app was foregrounded with playback paused.
+                var tick = 0
                 while (progression.isPlaying) {
                     val posMs = progression.calculateElapsedPositionMs()
-                    _positionDs.value = posMs.msToDs()
                     // Feed the live position to the Smart Chain tracker so the
                     // listened-fraction at a song change is accurate (the
-                    // progression callback alone is too infrequent).
+                    // progression callback alone is too infrequent). This
+                    // stays at full 100ms resolution - it's cheap (just stores
+                    // a Long) and the tracker's accuracy depends on it.
                     playbackTracker.onPositionTick(posMs)
+                    // The UI (seek bar) only needs to visually move a few
+                    // times a second - reassigning a Material Slider's value
+                    // is expensive enough that doing it 10x/second measurably
+                    // costs real RenderThread time for no visible benefit
+                    // (nothing moves faster-looking above ~4x/second to the
+                    // eye). Update the UI-facing StateFlow at ~3.3Hz instead,
+                    // decoupled from the tracker's own full-resolution tick.
+                    if (tick % UI_POSITION_UPDATE_EVERY_N_TICKS == 0) {
+                        _positionDs.value = posMs.msToDs()
+                    }
+                    tick++
                     // Wait a deci-second for the next position tick.
                     delay(100)
                 }
@@ -657,6 +670,13 @@ constructor(
             return
         }
         _openPanel.put(panel)
+    }
+
+    private companion object {
+        // Position ticks happen every 100ms (for the Smart Chain tracker's
+        // accuracy); the UI-facing position only needs to update a few times
+        // a second to look smooth. 3 -> every ~300ms (~3.3Hz).
+        const val UI_POSITION_UPDATE_EVERY_N_TICKS = 3
     }
 }
 

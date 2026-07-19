@@ -99,15 +99,14 @@ class PlaybackPanelFragment :
 
         binding.playbackCover.onSwipeListener = this
         binding.playbackSong.apply {
-            isSelected = true
+            // Marquee is now driven by updatePlaying() (isSelected tracks
+            // isPlaying), not set unconditionally here - see that function.
             setOnClickListener { navigateToCurrentSong() }
         }
         binding.playbackArtist.apply {
-            isSelected = true
             setOnClickListener { navigateToCurrentArtist() }
         }
         binding.playbackAlbum?.apply {
-            isSelected = true
             setOnClickListener { navigateToCurrentAlbum() }
         }
 
@@ -256,7 +255,17 @@ class PlaybackPanelFragment :
     }
 
     private fun updatePlaying(isPlaying: Boolean) {
-        requireBinding().playbackPlayPause.isActivated = isPlaying
+        val binding = requireBinding()
+        binding.playbackPlayPause.isActivated = isPlaying
+        // Same fix as PlaybackBarFragment: this view stays alive (faded via
+        // alpha, never destroyed) even while the panel is collapsed, so an
+        // unconditional isSelected=true at bind time kept these three
+        // marquees scrolling continuously and invisibly for the Fragment's
+        // entire lifetime, regardless of play state. Only animate while
+        // genuinely playing.
+        binding.playbackSong.isSelected = isPlaying
+        binding.playbackArtist.isSelected = isPlaying
+        binding.playbackAlbum?.isSelected = isPlaying
     }
 
     private fun updateShuffled(isShuffled: Boolean) {
