@@ -16,7 +16,7 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <TextView
+    <org.oxycblt.auxio.playback.ui.ThrottledMarqueeTextView
         android:id="@+id/playback_song"
         style="@style/Widget.Auxio.TextView.Primary.Compact"
         android:layout_width="0dp"
@@ -30,15 +30,14 @@
         app:layout_constraintVertical_chainStyle="packed"
         tools:text="Song Name" />
 
-    <TextView
+    <org.oxycblt.auxio.playback.ui.ThrottledMarqueeTextView
         android:id="@+id/playback_info"
         style="@style/Widget.Auxio.TextView.Secondary.Compact"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginStart="@dimen/spacing_small"
         android:layout_marginEnd="@dimen/spacing_tiny"
-        android:ellipsize="marquee"
-        android:marqueeRepeatLimit="marquee_forever"
+        android:ellipsize="end"
         app:layout_constraintBottom_toBottomOf="@+id/playback_cover"
         app:layout_constraintEnd_toStartOf="@+id/playback_controls_wrapper"
         app:layout_constraintStart_toEndOf="@+id/playback_cover"

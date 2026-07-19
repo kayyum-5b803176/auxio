@@ -60,7 +60,9 @@ import org.oxycblt.auxio.music.IndexingState
 import org.oxycblt.auxio.music.MusicType
 import org.oxycblt.auxio.music.MusicViewModel
 import org.oxycblt.auxio.playback.OpenPanel
+import org.oxycblt.auxio.playback.PlaybackBarFragment
 import org.oxycblt.auxio.playback.PlaybackBottomSheetBehavior
+import org.oxycblt.auxio.playback.PlaybackPanelFragment
 import org.oxycblt.auxio.playback.PlaybackViewModel
 import org.oxycblt.auxio.playback.queue.QueueBottomSheetBehavior
 import org.oxycblt.auxio.plugin.similarity.ZoneAxis
@@ -123,6 +125,22 @@ class MainFragment :
     private var lastQueueFragmentAlpha: Float? = null
     private var lastQueueSheetAlpha: Float? = null
     private var maxScaleXDistance = 0f
+
+    // Only marquee-scroll a bar/panel while it's actually visible - both stay
+    // alive (faded via alpha) even while collapsed, so without this their
+    // marquees kept animating for views nobody could see. This piggybacks on
+    // the alpha values onPreDraw ALREADY computes every frame (via the guards
+    // above) - only calls out to the child fragment at the exact moment
+    // visibility crosses the zero threshold, not every frame.
+    private fun notifyMarqueeVisibility(oldAlpha: Float?, newAlpha: Float, fragmentId: Int) {
+        val wasVisible = (oldAlpha ?: 0f) > 0f
+        val isVisible = newAlpha > 0f
+        if (wasVisible == isVisible) return
+        when (val fragment = childFragmentManager.findFragmentById(fragmentId)) {
+            is PlaybackBarFragment -> fragment.setMarqueeVisible(isVisible)
+            is PlaybackPanelFragment -> fragment.setMarqueeVisible(isVisible)
+        }
+    }
     private var sheetRising: Boolean? = null
     @Inject lateinit var uiSettings: UISettings
 
@@ -591,11 +609,13 @@ class MainFragment :
 
             val newBarAlpha = max(playbackOutRatio, queueBarRatio)
             if (newBarAlpha != lastPlaybackBarAlpha) {
+                notifyMarqueeVisibility(lastPlaybackBarAlpha, newBarAlpha, R.id.playback_bar_fragment)
                 lastPlaybackBarAlpha = newBarAlpha
                 binding.playbackBarFragment.alpha = newBarAlpha
             }
             val newPanelAlpha = min(playbackInRatio, queuePanelRatio)
             if (newPanelAlpha != lastPlaybackPanelAlpha) {
+                notifyMarqueeVisibility(lastPlaybackPanelAlpha, newPanelAlpha, R.id.playback_panel_fragment)
                 lastPlaybackPanelAlpha = newPanelAlpha
                 binding.playbackPanelFragment.alpha = newPanelAlpha
             }
@@ -613,10 +633,14 @@ class MainFragment :
         } else {
             // No queue sheet, fade normally based on the playback sheet
             if (playbackOutRatio != lastPlaybackBarAlpha) {
+                notifyMarqueeVisibility(
+                    lastPlaybackBarAlpha, playbackOutRatio, R.id.playback_bar_fragment)
                 lastPlaybackBarAlpha = playbackOutRatio
                 binding.playbackBarFragment.alpha = playbackOutRatio
             }
             if (playbackInRatio != lastPlaybackPanelAlpha) {
+                notifyMarqueeVisibility(
+                    lastPlaybackPanelAlpha, playbackInRatio, R.id.playback_panel_fragment)
                 lastPlaybackPanelAlpha = playbackInRatio
                 binding.playbackPanelFragment.alpha = playbackInRatio
             }
@@ -1004,7 +1028,14 @@ class MainFragment :
         }
 
         fun invalidateEnabled() {
-            isEnabled = queueSheetShown() || playbackSheetShown()
+            // This is called from onPreDraw on EVERY frame. OnBackPressedCallback's
+            // isEnabled setter invokes its enabled-changed callback on every
+            // assignment (even a no-op one), which walks the dispatcher's callback
+            // list each time - so only assign when the value actually changes.
+            val enabled = queueSheetShown() || playbackSheetShown()
+            if (isEnabled != enabled) {
+                isEnabled = enabled
+            }
         }
 
         private fun playbackSheetShown() =

@@ -106,19 +106,42 @@ class PlaybackBarFragment : ViewBindingFragment<FragmentPlaybackBarBinding>() {
         binding.playbackSong.text = song.name.resolve(context)
         binding.playbackInfo.text = song.artists.resolveNames(context)
         binding.playbackProgressBar.max = song.durationMs.msToDs().toInt()
+        // Marquee now has a finite repeat limit (instead of forever) so the UI
+        // can return to a fully-idle, zero-redraw state between songs. TextView
+        // does not reliably restart a finished marquee on setText alone, so
+        // re-toggle the selection to guarantee a fresh scroll cycle per track.
+        binding.playbackSong.isSelected = false
+        binding.playbackInfo.isSelected = false
+        applyMarqueeState()
     }
+
+    // Marquee should only animate while BOTH playing AND actually visible.
+    // Previously this only checked isPlaying - but this Fragment's view stays
+    // alive (faded via alpha) even while the collapsed mini-bar itself is the
+    // one hidden behind the expanded panel, so the marquee kept scrolling for
+    // an invisible view, wasting the same class of redraw work the isPlaying
+    // gate was meant to eliminate. setMarqueeVisible() is called by
+    // MainFragment only at the moment visibility actually crosses zero, using
+    // alpha values it already computes each frame - no new per-frame cost.
+    private var isCurrentlyPlaying = false
+    private var isMarqueeVisible = true
 
     private fun updatePlaying(isPlaying: Boolean) {
         requireBinding().playbackPlayPause.isActivated = isPlaying
-        // Marquee (isSelected=true) drives a continuous, self-perpetuating
-        // scroll animation for as long as it's set - previously this was set
-        // once, permanently, at bind time, regardless of whether a song was
-        // even playing. That kept the text continuously animating (and
-        // continuously requesting redraws) for the Fragment's ENTIRE
-        // lifetime. Only animate while genuinely playing; paused text just
-        // stops scrolling where it is, matching most media players.
-        requireBinding().playbackSong.isSelected = isPlaying
-        requireBinding().playbackInfo.isSelected = isPlaying
+        isCurrentlyPlaying = isPlaying
+        applyMarqueeState()
+    }
+
+    fun setMarqueeVisible(visible: Boolean) {
+        if (isMarqueeVisible == visible) return
+        isMarqueeVisible = visible
+        applyMarqueeState()
+    }
+
+    private fun applyMarqueeState() {
+        val active = isCurrentlyPlaying && isMarqueeVisible
+        requireBinding().playbackSong.isSelected = active
+        requireBinding().playbackInfo.isSelected = active
     }
 
     private fun updatePosition(positionDs: Long) {

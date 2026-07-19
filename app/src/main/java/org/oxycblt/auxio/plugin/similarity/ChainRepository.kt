@@ -426,17 +426,26 @@ constructor(
         if (n <= 1) return IntArray(n) { it }
         val start = startHeapIndex.coerceIn(0, n - 1)
 
-        // Resolve keys and gather vectors + quality once.
+        // Resolve keys and gather vectors + quality once — BATCHED. This used
+        // to run one Room query per song for the fingerprint (keyOf) and then
+        // ANOTHER query per key for frequency; on a large shuffle-all that was
+        // thousands of sequential SQLite round-trips and a multi-second CPU
+        // spike every time the queue was (re)shuffled. Now it's a handful of
+        // chunked IN queries.
+        val fpByUid = fingerprintRepository.getCachedBatch(heap)
         val keys = arrayOfNulls<String>(n)
-        for (i in 0 until n) keys[i] = keyOf(heap[i])
+        for (i in 0 until n) {
+            val song = heap[i]
+            val fpKey = fpByUid[song.uid.toString()]?.let { ChainKey.of(it.fingerprint) }
+            keys[i] = fpKey ?: ("uid:" + song.uid.toString())
+        }
 
         val distinctKeys = keys.filterNotNull().distinct()
         val vecByKey = HashMap<String, FloatArray>()
         for (chunk in distinctKeys.chunked(BATCH)) {
             for (e in embeddingDao.getAll(chunk)) vecByKey[e.key] = e.vector
         }
-        val freqByKey = HashMap<String, Float>()
-        for (k in distinctKeys) freqByKey[k] = zoneAxisRepository.frequencyOf(k)
+        val freqByKey = HashMap<String, Float>(zoneAxisRepository.frequencyByKeys(distinctKeys))
 
         // Tags per key (which Language/Type value each song carries), batched.
         val tagByKey = HashMap<String, SongZoneTag>()
@@ -560,8 +569,14 @@ constructor(
         val filtered = (0 until n).filter { !used[it] && passesFilters(it) }
         // Never strand the queue if a filter combination matches nothing.
         val candidates = if (filtered.isEmpty()) (0 until n).filter { !used[it] } else filtered
+        // tagCloseness may compute a cosine per call and was previously
+        // re-evaluated up to three times per candidate (rank sort, cutoff,
+        // admit filter) plus O(n log n) times inside the comparator - compute
+        // it exactly once per candidate instead.
+        val closeness = FloatArray(n)
+        for (i in candidates) closeness[i] = tagCloseness(i)
         // Rank closest -> farthest.
-        val rankedByCloseness = candidates.sortedByDescending { tagCloseness(it) }
+        val rankedByCloseness = candidates.sortedByDescending { closeness[it] }
         // Depth fraction: randV -1 -> 0 (only rank 0), +1 -> 1 (all).
         val depthFrac = ((randV + 1f) / 2f).coerceIn(0f, 1f)
         val cutoffIdx =
@@ -570,9 +585,9 @@ constructor(
         // Admit every candidate whose closeness is >= the cutoff rank's closeness
         // (so a whole tag-group is admitted together, not split mid-group).
         val cutoffCloseness =
-            if (rankedByCloseness.isEmpty()) 0f else tagCloseness(rankedByCloseness[cutoffIdx])
+            if (rankedByCloseness.isEmpty()) 0f else closeness[rankedByCloseness[cutoffIdx]]
         val eligible = ArrayList<Int>(n)
-        for (i in candidates) if (tagCloseness(i) >= cutoffCloseness - 1e-4f) eligible.add(i)
+        for (i in candidates) if (closeness[i] >= cutoffCloseness - 1e-4f) eligible.add(i)
         // Never strand the queue.
         if (eligible.isEmpty()) eligible.addAll(candidates)
 
@@ -629,15 +644,17 @@ constructor(
         }
 
         val fade = kotlin.math.abs(simV)
-        val eligibleSorted =
-            eligible.sortedWith(
-                compareByDescending<Int> {
-                    val axisMetaContrib =
-                        axisShare * axisCloseness(it) + metaShare * (metaCloseness(it) / META_MAX)
-                    val structured = freqContribution(it) * STAGE2_WEIGHT + axisMetaContrib
-                    val acoustic = simTo(it) * (if (simV >= 0f) 1f else -1f)
-                    (1f - fade) * structured + fade * acoustic
-                })
+        // Score each candidate exactly ONCE. The comparator form re-evaluated
+        // the full score (including a 24-dim cosine) O(n log n) times.
+        val sortScore = FloatArray(n)
+        for (i in eligible) {
+            val axisMetaContrib =
+                axisShare * axisCloseness(i) + metaShare * (metaCloseness(i) / META_MAX)
+            val structured = freqContribution(i) * STAGE2_WEIGHT + axisMetaContrib
+            val acoustic = simTo(i) * (if (simV >= 0f) 1f else -1f)
+            sortScore[i] = (1f - fade) * structured + fade * acoustic
+        }
+        val eligibleSorted = eligible.sortedByDescending { sortScore[it] }
 
         // Emit, honoring the recently-played guard as a soft de-prioritizer.
         val nonRecent = eligibleSorted.filter { keys[it] !in recent }

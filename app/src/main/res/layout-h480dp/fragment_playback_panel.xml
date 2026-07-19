@@ -47,21 +47,21 @@
         app:layout_constraintVertical_bias="1.0"
         app:layout_constraintVertical_chainStyle="packed">
 
-        <TextView
+        <org.oxycblt.auxio.playback.ui.ThrottledMarqueeTextView
             android:id="@+id/playback_song"
             style="@style/Widget.Auxio.TextView.Primary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             tools:text="Song Name" />
 
-        <TextView
+        <org.oxycblt.auxio.playback.ui.ThrottledMarqueeTextView
             android:id="@+id/playback_artist"
             style="@style/Widget.Auxio.TextView.Secondary.Marquee"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             tools:text="Artist Name" />
 
-        <TextView
+        <org.oxycblt.auxio.playback.ui.ThrottledMarqueeTextView
             android:id="@+id/playback_album"
             style="@style/Widget.Auxio.TextView.Secondary.Marquee"
             android:layout_width="match_parent"

@@ -180,25 +180,30 @@ constructor(
                 var tick = 0
                 while (progression.isPlaying) {
                     val posMs = progression.calculateElapsedPositionMs()
-                    // Feed the live position to the Smart Chain tracker so the
-                    // listened-fraction at a song change is accurate (the
-                    // progression callback alone is too infrequent). This
-                    // stays at full 100ms resolution - it's cheap (just stores
-                    // a Long) and the tracker's accuracy depends on it.
-                    playbackTracker.onPositionTick(posMs)
+                    // Only the Smart Chain tracker needs 100ms resolution (for
+                    // an accurate listened-fraction at song change). When the
+                    // plugin is off, every tick would be a no-op there, so
+                    // poll at the UI's own 300ms cadence instead - 3.3x fewer
+                    // coroutine wakeups, both foregrounded AND backgrounded
+                    // (this loop lives in viewModelScope and keeps running
+                    // while the app is in the background during playback).
+                    val fastTicks = playbackTracker.needsPositionTicks
+                    if (fastTicks) {
+                        playbackTracker.onPositionTick(posMs)
+                    }
                     // The UI (seek bar) only needs to visually move a few
                     // times a second - reassigning a Material Slider's value
                     // is expensive enough that doing it 10x/second measurably
                     // costs real RenderThread time for no visible benefit
                     // (nothing moves faster-looking above ~4x/second to the
-                    // eye). Update the UI-facing StateFlow at ~3.3Hz instead,
-                    // decoupled from the tracker's own full-resolution tick.
-                    if (tick % UI_POSITION_UPDATE_EVERY_N_TICKS == 0) {
+                    // eye). Update the UI-facing StateFlow at ~3.3Hz,
+                    // decoupled from the tracker's full-resolution tick.
+                    if (!fastTicks || tick % UI_POSITION_UPDATE_EVERY_N_TICKS == 0) {
                         _positionDs.value = posMs.msToDs()
                     }
                     tick++
-                    // Wait a deci-second for the next position tick.
-                    delay(100)
+                    // 100ms resolution for the tracker, 300ms for UI-only.
+                    delay(if (fastTicks) 100 else 300)
                 }
             }
     }

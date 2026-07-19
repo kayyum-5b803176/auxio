@@ -111,6 +111,14 @@ constructor(
      * plays, so the listened-fraction computed at a song change is accurate.
      * The progression state-change callback alone is too infrequent.
      */
+    /**
+     * Whether the tracker actually needs high-resolution (100ms) position
+     * ticks. When Smart Chain is disabled every tick is a no-op, so the
+     * caller's polling loop can slow down and save wakeups/CPU.
+     */
+    val needsPositionTicks: Boolean
+        get() = pluginSettings.smartChainEnabled
+
     fun onPositionTick(positionMs: Long) {
         if (!pluginSettings.smartChainEnabled) return
         if (playbackManager.currentSong == currentSong) {

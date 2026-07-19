@@ -10,7 +10,7 @@
     -->
 
     <!-- Frame 1 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -26,7 +26,7 @@
     </item>
 
     <!-- Frame 2 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -42,7 +42,7 @@
     </item>
 
     <!-- Frame 3 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -58,7 +58,7 @@
     </item>
 
     <!-- Frame 4 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -74,7 +74,7 @@
     </item>
 
     <!-- Frame 5 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -90,7 +90,7 @@
     </item>
 
     <!-- Frame 6 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -106,7 +106,7 @@
     </item>
 
     <!-- Frame 7 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -122,7 +122,7 @@
     </item>
 
     <!-- Frame 8 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -138,7 +138,7 @@
     </item>
 
     <!-- Frame 9 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -154,7 +154,7 @@
     </item>
 
     <!-- Frame 10 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -170,7 +170,7 @@
     </item>
 
     <!-- Frame 11 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -186,7 +186,7 @@
     </item>
 
     <!-- Frame 12 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -202,7 +202,7 @@
     </item>
 
     <!-- Frame 13 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -218,7 +218,7 @@
     </item>
 
     <!-- Frame 14 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -234,7 +234,7 @@
     </item>
 
     <!-- Frame 15 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -250,7 +250,7 @@
     </item>
 
     <!-- Frame 16 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -266,7 +266,7 @@
     </item>
 
     <!-- Frame 17 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -282,7 +282,7 @@
     </item>
 
     <!-- Frame 18 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -298,7 +298,7 @@
     </item>
 
     <!-- Frame 19 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -314,7 +314,7 @@
     </item>
 
     <!-- Frame 20 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -330,7 +330,7 @@
     </item>
 
     <!-- Frame 21 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -346,7 +346,7 @@
     </item>
 
     <!-- Frame 22 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -362,7 +362,7 @@
     </item>
 
     <!-- Frame 23 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -378,7 +378,7 @@
     </item>
 
     <!-- Frame 24 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -394,7 +394,7 @@
     </item>
 
     <!-- Frame 25 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -410,7 +410,7 @@
     </item>
 
     <!-- Frame 26 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -426,7 +426,7 @@
     </item>
 
     <!-- Frame 27 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -442,7 +442,7 @@
     </item>
 
     <!-- Frame 28 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -458,7 +458,7 @@
     </item>
 
     <!-- Frame 29 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"
@@ -474,7 +474,7 @@
     </item>
 
     <!-- Frame 30 -->
-    <item android:duration="30">
+    <item android:duration="50">
         <aapt:attr name="android:drawable">
             <vector
                 android:width="24dp"

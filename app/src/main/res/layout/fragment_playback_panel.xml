@@ -47,14 +47,14 @@
         app:layout_constraintTop_toTopOf="@+id/playback_cover"
         app:layout_constraintVertical_chainStyle="packed">
 
-        <TextView
+        <org.oxycblt.auxio.playback.ui.ThrottledMarqueeTextView
             android:id="@+id/playback_song"
             style="@style/Widget.Auxio.TextView.Primary.Compact"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             tools:text="Song Name" />
 
-        <TextView
+        <org.oxycblt.auxio.playback.ui.ThrottledMarqueeTextView
             android:id="@+id/playback_artist"
             style="@style/Widget.Auxio.TextView.Secondary.Compact"
             android:layout_width="match_parent"

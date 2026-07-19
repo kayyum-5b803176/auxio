@@ -234,6 +234,14 @@ class PlaybackPanelFragment :
         binding.playbackArtist.text = song.artists.resolveNames(context)
         binding.playbackAlbum?.text = song.album.name.resolve(context)
         binding.playbackSeekBar?.durationDs = song.durationMs.msToDs()
+        // Marquee now has a finite repeat limit (instead of forever) so the UI
+        // can return to a fully-idle, zero-redraw state between songs. TextView
+        // does not reliably restart a finished marquee on setText alone, so
+        // re-toggle the selection to guarantee a fresh scroll cycle per track.
+        binding.playbackSong.isSelected = false
+        binding.playbackArtist.isSelected = false
+        binding.playbackAlbum?.isSelected = false
+        applyMarqueeState()
     }
 
     private fun updateParent(parent: MusicParent?) {
@@ -254,18 +262,35 @@ class PlaybackPanelFragment :
         }
     }
 
+    // Marquee should only animate while BOTH playing AND actually visible.
+    // This Fragment's view stays alive (faded via alpha) even while the panel
+    // is COLLAPSED - previously the marquee kept scrolling for these three
+    // invisible views the entire time music played, wasting redraw work on
+    // something nobody could see. setMarqueeVisible() is called by
+    // MainFragment only at the moment visibility actually crosses zero, using
+    // alpha values it already computes each frame - no new per-frame cost.
+    private var isCurrentlyPlaying = false
+    private var isMarqueeVisible = false // panel starts collapsed/hidden
+
     private fun updatePlaying(isPlaying: Boolean) {
         val binding = requireBinding()
         binding.playbackPlayPause.isActivated = isPlaying
-        // Same fix as PlaybackBarFragment: this view stays alive (faded via
-        // alpha, never destroyed) even while the panel is collapsed, so an
-        // unconditional isSelected=true at bind time kept these three
-        // marquees scrolling continuously and invisibly for the Fragment's
-        // entire lifetime, regardless of play state. Only animate while
-        // genuinely playing.
-        binding.playbackSong.isSelected = isPlaying
-        binding.playbackArtist.isSelected = isPlaying
-        binding.playbackAlbum?.isSelected = isPlaying
+        isCurrentlyPlaying = isPlaying
+        applyMarqueeState()
+    }
+
+    fun setMarqueeVisible(visible: Boolean) {
+        if (isMarqueeVisible == visible) return
+        isMarqueeVisible = visible
+        applyMarqueeState()
+    }
+
+    private fun applyMarqueeState() {
+        val binding = requireBinding()
+        val active = isCurrentlyPlaying && isMarqueeVisible
+        binding.playbackSong.isSelected = active
+        binding.playbackArtist.isSelected = active
+        binding.playbackAlbum?.isSelected = active
     }
 
     private fun updateShuffled(isShuffled: Boolean) {

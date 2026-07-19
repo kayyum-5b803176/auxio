@@ -60,6 +60,11 @@ interface FingerprintDao {
     @Query("SELECT * FROM FingerprintEntity WHERE uid = :uid")
     suspend fun get(uid: Music.UID): FingerprintEntity?
 
+    /** Batched lookup for the shuffle-ordering pass (chunk to stay under
+     * SQLite's bound-variable limit). */
+    @Query("SELECT * FROM FingerprintEntity WHERE uid IN (:uids)")
+    suspend fun getAll(uids: List<Music.UID>): List<FingerprintEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entity: FingerprintEntity)
 

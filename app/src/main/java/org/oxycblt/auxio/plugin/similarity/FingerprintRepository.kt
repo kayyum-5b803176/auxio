@@ -39,6 +39,14 @@ interface FingerprintRepository {
      */
     suspend fun getCached(song: Song): FingerprintResult?
 
+    /**
+     * Batched [getCached] for many songs at once. Returns a map keyed by the
+     * song's UID string containing only valid cache HITS. Use this instead of
+     * calling [getCached] in a loop — one-query-per-song was the dominant CPU
+     * cost of computing a chain shuffle order over a large library.
+     */
+    suspend fun getCachedBatch(songs: List<Song>): Map<String, FingerprintResult>
+
     /** Persist a freshly computed result (empty fingerprint allowed). */
     suspend fun put(song: Song, result: FingerprintResult)
 
@@ -61,6 +69,28 @@ constructor(private val dao: FingerprintDao) : FingerprintRepository {
         return if (fresh) FingerprintResult(entity.fingerprint, entity.spectralProfile) else null
     }
 
+    override suspend fun getCachedBatch(songs: List<Song>): Map<String, FingerprintResult> {
+        if (songs.isEmpty()) return emptyMap()
+        // Freshness (modifiedMs) is per-song, so index songs by uid first.
+        val songByUid = HashMap<String, Song>(songs.size)
+        for (s in songs) songByUid[s.uid.toString()] = s
+        val out = HashMap<String, FingerprintResult>(songs.size)
+        for (chunk in songs.map { it.uid }.distinct().chunked(BATCH)) {
+            for (entity in dao.getAll(chunk)) {
+                val uidStr = entity.uid.toString()
+                val song = songByUid[uidStr] ?: continue
+                val fresh =
+                    entity.modifiedMs == song.modifiedMs &&
+                        entity.algorithmVersion ==
+                            AudioFingerprinterImpl.FINGERPRINT_ALGORITHM_VERSION
+                if (fresh) {
+                    out[uidStr] = FingerprintResult(entity.fingerprint, entity.spectralProfile)
+                }
+            }
+        }
+        return out
+    }
+
     override suspend fun put(song: Song, result: FingerprintResult) {
         dao.insert(
             FingerprintEntity(
@@ -77,5 +107,10 @@ constructor(private val dao: FingerprintDao) : FingerprintRepository {
 
     override suspend fun clear() {
         dao.nuke()
+    }
+
+    private companion object {
+        // Stay well under SQLite's default 999 bound-variable limit.
+        const val BATCH = 500
     }
 }

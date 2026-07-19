@@ -66,6 +66,13 @@ interface ZoneAxisRepository {
     suspend fun frequencyOf(songKey: String): Float
 
     /**
+     * Batched [frequencyOf] for the ordering pass — one chunked IN query
+     * instead of one query per song. Keys with no history are omitted
+     * (callers should default to 0f / neutral).
+     */
+    suspend fun frequencyByKeys(songKeys: List<String>): Map<String, Float>
+
+    /**
      * The stored relative value between two axis values, -1f..+1f (positive =
      * similar/attract, negative = opposite/repel). Symmetric; unset pairs and
      * any pair involving a null id return 0f (neutral).
@@ -207,6 +214,10 @@ constructor(
      */
     private suspend fun frequencyPosition(key: String): Float {
         val q = qualityDao.get(key) ?: return 0f
+        return frequencyPositionOf(q)
+    }
+
+    private fun frequencyPositionOf(q: SongQuality): Float {
         val plays = q.playCount
         val skips = q.skipCount
         val n = plays + skips
@@ -214,6 +225,15 @@ constructor(
         val r = plays.toFloat() / n // 0..1
         val shrink = n.toFloat() / (n + FREQ_SHRINK_K)
         return ((2f * r) - 1f) * shrink // -1..1
+    }
+
+    override suspend fun frequencyByKeys(songKeys: List<String>): Map<String, Float> {
+        if (songKeys.isEmpty()) return emptyMap()
+        val out = HashMap<String, Float>(songKeys.size)
+        for (chunk in songKeys.chunked(BATCH)) {
+            for (q in qualityDao.getAll(chunk)) out[q.key] = frequencyPositionOf(q)
+        }
+        return out
     }
 
     override suspend fun relationBetween(valueIdA: Long?, valueIdB: Long?): Float {

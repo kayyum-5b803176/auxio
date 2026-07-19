@@ -53,8 +53,23 @@ object ChainKey {
             buffer[i] = ((fingerprint[i] ushr COARSEN_SHIFT) and 0xFF).toByte()
         }
         digest.update(buffer)
-        return digest.digest().joinToString("") { "%02x".format(it) }.substring(0, KEY_LENGTH)
+        // Only the first KEY_LENGTH hex chars are kept, so format just those
+        // bytes - and with a lookup table instead of String.format, which does
+        // a locale lookup + parse per byte (this runs once per song during the
+        // ordering pass, so it's on a hot-ish path for big libraries).
+        val hash = digest.digest()
+        val sb = StringBuilder(KEY_LENGTH)
+        var i = 0
+        while (sb.length < KEY_LENGTH && i < hash.size) {
+            val b = hash[i].toInt() and 0xFF
+            sb.append(HEX[b ushr 4])
+            if (sb.length < KEY_LENGTH) sb.append(HEX[b and 0xF])
+            i++
+        }
+        return sb.toString()
     }
+
+    private val HEX = "0123456789abcdef".toCharArray()
 
     private const val MIN_FRAMES = 8
     private const val COARSEN_SHIFT = 7 // drop the 7 lowest (most encoding-sensitive) bits
