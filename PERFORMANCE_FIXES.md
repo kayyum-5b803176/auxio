@@ -1,5 +1,25 @@
 # Performance fixes (foreground CPU 99–201% -> expected near-idle)
 
+## Round 3 — smooth AND cheap marquee
+
+Round 2's 25fps scrollTo ticker had two flaws: Handler-timed ticks aren't
+vsync-aligned (visible judder — the "struggling" text), and every tick still
+re-recorded the full text draw, so scrolling stayed expensive.
+
+`ThrottledMarqueeTextView` reworked: the full text line is rendered ONCE into
+an offscreen bitmap when a scroll cycle starts; a vsync-driven ValueAnimator
+then animates a float offset at the display's native rate and onDraw is a
+single drawBitmap(). Motion is perfectly smooth (linear, vsync-aligned) while
+per-frame cost on the main thread and RenderThread collapses to near-zero
+(one blit instead of a glyph-run re-record + re-render). After 3 passes the
+view goes fully idle and the bitmap is released. Still driven by isSelected,
+so all existing gating is unchanged.
+
+Reminder for measuring: ~20% of playback CPU on the profiled device is
+software audio decoding (format has no HW decoder) — that floor is not
+reachable by UI fixes — and debug builds (org.oxycblt.auxio.debug) roughly
+double all rendering costs; profile the release build.
+
 ## Round 2 — driven by Perfetto traces (the definitive analysis)
 
 Three traces (foreground+playing, background+playing, foreground+paused)

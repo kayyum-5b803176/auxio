@@ -18,56 +18,60 @@
 
 package org.oxycblt.auxio.playback.ui
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
 import android.text.Layout
 import android.text.TextUtils
 import android.util.AttributeSet
+import android.view.animation.LinearInterpolator
 import androidx.appcompat.widget.AppCompatTextView
+import kotlin.math.ceil
+import kotlin.math.min
 
 /**
- * A drop-in replacement for TextView's built-in marquee that renders at a
- * THROTTLED frame rate instead of every display vsync.
+ * A cheap, smooth replacement for TextView's built-in marquee.
  *
- * Why: Perfetto traces showed that while the framework marquee scrolls, the
- * app produces a frame on EVERY vsync (60-120/s) for the whole scroll
- * duration, and each frame costs several ms of main-thread + RenderThread
- * CPU — the marquee alone accounted for the bulk of ~99% foreground CPU
- * during playback. The framework marquee's frame rate is not configurable.
+ * WHY (from Perfetto traces of the stock marquee): the framework marquee
+ * invalidates the TextView on EVERY display vsync, and each of those frames
+ * re-records the text draw (glyph runs) on the main thread and re-renders it
+ * on the RenderThread — ~11ms of CPU per frame on the profiled device, i.e.
+ * ~80% of a core for as long as anything scrolls. A first attempt that merely
+ * throttled scrollTo() to 25fps was still expensive per frame AND looked
+ * juddery, because Handler-timed ticks aren't vsync-aligned.
  *
- * This view scrolls the text itself via [scrollTo] on a shared ~25fps ticker:
- *  - ~2.5-5x fewer frames than the framework marquee on 60-120Hz displays.
- *  - All instances step on ONE shared tick, so three scrolling labels
- *    coalesce into one frame instead of three independent invalidations.
- *  - A finite repeat count, then the view goes fully idle (zero redraws)
- *    with a trailing ellipsis until the next song/panel event.
+ * HOW this version fixes both:
+ *  - The full (un-ellipsized) text line is rendered ONCE into a bitmap when a
+ *    scroll cycle starts.
+ *  - A vsync-driven [ValueAnimator] then animates a plain float offset at the
+ *    display's native rate, and onDraw is a single drawBitmap() — the display
+ *    list re-record is one op instead of a full text draw. Per-frame cost on
+ *    both threads collapses to near-zero, while motion is perfectly smooth
+ *    (linear, vsync-aligned).
+ *  - After [REPEATS] full passes the view goes completely idle (zero redraws,
+ *    END ellipsis) and the bitmap is released, until the next song/selection.
  *
- * API-compatible with how the playback fragments drove the old marquee:
- * scrolling is started/stopped by [setSelected], exactly like the framework
- * marquee, so the existing isSelected-based gating (playing + visible) keeps
- * working unchanged. Requires android:singleLine="true" (set by the styles).
+ * Driven by [setSelected] exactly like the framework marquee, so the existing
+ * playing+visibility gating in the playback fragments works unchanged.
  */
 class ThrottledMarqueeTextView
 @JvmOverloads
 constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0) :
     AppCompatTextView(context, attrs, defStyleAttr) {
 
-    private enum class Phase {
-        START_HOLD,
-        SCROLLING,
-        END_HOLD
-    }
-
     private var active = false
     private var scrollModeEnabled = false
-    private var phase = Phase.START_HOLD
-    private var holdTicksLeft = 0
-    private var repeatsLeft = 0
+    private var rtl = false
     private var offsetPx = 0f
     private var scrollRangePx = 0f
-    private var rtl = false
-    private val stepPx = SPEED_DP_PER_SEC * context.resources.displayMetrics.density * (FRAME_MS / 1000f)
+    private var repeatsLeft = 0
+    private var lineBitmap: Bitmap? = null
+    private var animator: ValueAnimator? = null
+    private val speedPxPerSec = SPEED_DP_PER_SEC * context.resources.displayMetrics.density
 
     override fun setSelected(selected: Boolean) {
         super.setSelected(selected)
@@ -94,8 +98,12 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        if (isSelected && !active) {
-            maybeStart()
+        if (active) {
+            // Geometry changed under a running scroll; restart cleanly.
+            stop()
+        }
+        if (isSelected) {
+            post { maybeStart() }
         }
     }
 
@@ -104,13 +112,37 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
         super.onDetachedFromWindow()
     }
 
+    override fun onDraw(canvas: Canvas) {
+        val bitmap = lineBitmap
+        if (!active || bitmap == null) {
+            super.onDraw(canvas)
+            return
+        }
+        // One textured blit per frame; content was rendered once at start.
+        val availW = width - compoundPaddingLeft - compoundPaddingRight
+        val x =
+            if (rtl) {
+                // RTL: right edge anchored, reveal leftwards.
+                compoundPaddingLeft + (availW - bitmap.width) + offsetPx
+            } else {
+                compoundPaddingLeft - offsetPx
+            }
+        val save = canvas.save()
+        canvas.clipRect(
+            compoundPaddingLeft,
+            0,
+            width - compoundPaddingRight,
+            height)
+        canvas.drawBitmap(bitmap, x, extendedPaddingTop.toFloat(), null)
+        canvas.restoreToCount(save)
+    }
+
     private fun maybeStart() {
         if (active || !isAttachedToWindow || width == 0) return
-        // Scrolling needs the FULL text laid out on one unbounded line:
-        // horizontallyScrolling=true (some styles only set maxLines=1, which
-        // does not enable it) and no ellipsis. The idle state is the reverse.
-        // Both changes rebuild the layout, so apply them and re-enter once
-        // the new layout has settled.
+        // Measuring the overflow needs the FULL text laid out on one unbounded
+        // line: horizontallyScrolling=true (some styles only set maxLines=1,
+        // which doesn't enable it) and no ellipsis. Both rebuild the layout,
+        // so apply and re-enter once it settles.
         if (!scrollModeEnabled || ellipsize != null) {
             scrollModeEnabled = true
             setHorizontallyScrolling(true)
@@ -119,30 +151,104 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
             return
         }
         val layout = layout ?: return
-        val avail = (width - compoundPaddingLeft - compoundPaddingRight).toFloat()
-        scrollRangePx = layout.getLineWidth(0) - avail + EDGE_GAP_PX
-        if (scrollRangePx <= EDGE_GAP_PX) {
-            // Fits — nothing to scroll; restore the (unused) ellipsis and idle.
+        if (layout.lineCount == 0) {
+            finishIdle()
+            return
+        }
+        val availW = (width - compoundPaddingLeft - compoundPaddingRight).toFloat()
+        val lineW = layout.getLineWidth(0)
+        scrollRangePx = lineW - availW + EDGE_GAP_PX
+        if (scrollRangePx <= EDGE_GAP_PX || availW <= 0f) {
+            // Fits — nothing to scroll.
             finishIdle()
             return
         }
         rtl = layout.getParagraphDirection(0) == Layout.DIR_RIGHT_TO_LEFT
+        val bitmap = renderLine(layout, lineW) ?: run {
+            finishIdle()
+            return
+        }
+        lineBitmap = bitmap
+        // If the bitmap had to be capped (GPU texture limit), don't scroll
+        // past what was actually rendered.
+        scrollRangePx = min(scrollRangePx, bitmap.width - availW + EDGE_GAP_PX)
         active = true
-        phase = Phase.START_HOLD
-        holdTicksLeft = (START_HOLD_MS / FRAME_MS).toInt()
         repeatsLeft = REPEATS
         offsetPx = 0f
-        applyScroll()
-        Ticker.add(this)
+        invalidate()
+        startPass()
+    }
+
+    /** Render the single full-width text line into an offscreen bitmap once. */
+    private fun renderLine(layout: Layout, lineW: Float): Bitmap? {
+        val w = min(ceil(lineW).toInt() + 1, MAX_BITMAP_WIDTH_PX)
+        val h = layout.height.coerceAtLeast(1)
+        if (w <= 0) return null
+        return try {
+            val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(Color.TRANSPARENT)
+            val canvas = Canvas(bitmap)
+            // TextView normally sets these on the shared TextPaint inside its
+            // own onDraw; replicate so the layout draws with the right color
+            // and state (Layout.draw uses the paint it was built with).
+            paint.color = currentTextColor
+            paint.drawableState = drawableState
+            layout.draw(canvas)
+            bitmap
+        } catch (e: OutOfMemoryError) {
+            null
+        }
+    }
+
+    private fun startPass() {
+        animator?.cancel()
+        animator =
+            ValueAnimator.ofFloat(0f, scrollRangePx).apply {
+                interpolator = LinearInterpolator()
+                duration = (scrollRangePx / speedPxPerSec * 1000f).toLong().coerceAtLeast(1L)
+                startDelay = START_HOLD_MS
+                addUpdateListener {
+                    offsetPx = it.animatedValue as Float
+                    invalidate()
+                }
+                addListener(
+                    object : AnimatorListenerAdapter() {
+                        private var canceled = false
+
+                        override fun onAnimationCancel(animation: Animator) {
+                            canceled = true
+                        }
+
+                        override fun onAnimationEnd(animation: Animator) {
+                            if (canceled || !active) return
+                            repeatsLeft--
+                            if (repeatsLeft > 0) {
+                                // Hold at the end, then run the next pass.
+                                postDelayed(
+                                    {
+                                        if (active) {
+                                            offsetPx = 0f
+                                            invalidate()
+                                            startPass()
+                                        }
+                                    },
+                                    END_HOLD_MS)
+                            } else {
+                                postDelayed({ if (active) finishIdle() }, END_HOLD_MS)
+                            }
+                        }
+                    })
+                start()
+            }
     }
 
     private fun stop() {
-        if (active) {
-            Ticker.remove(this)
-            active = false
-        }
+        animator?.cancel()
+        animator = null
+        active = false
         offsetPx = 0f
-        scrollTo(0, 0)
+        lineBitmap?.recycle()
+        lineBitmap = null
         if (scrollModeEnabled) {
             scrollModeEnabled = false
             setHorizontallyScrolling(false)
@@ -150,111 +256,25 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
         } else if (ellipsize == null) {
             ellipsize = TextUtils.TruncateAt.END
         }
-    }
-
-    private fun finishIdle() {
-        // Natural completion: rest at position 0 with an ellipsis, zero
-        // further redraws until the next song / selection event.
-        stop()
-    }
-
-    /** One shared-ticker step. Returns false when this view is done. */
-    internal fun tick(): Boolean {
-        if (!active) return false
-        when (phase) {
-            Phase.START_HOLD -> {
-                if (--holdTicksLeft <= 0) phase = Phase.SCROLLING
-            }
-            Phase.SCROLLING -> {
-                offsetPx += stepPx
-                if (offsetPx >= scrollRangePx) {
-                    offsetPx = scrollRangePx
-                    phase = Phase.END_HOLD
-                    holdTicksLeft = (END_HOLD_MS / FRAME_MS).toInt()
-                }
-                applyScroll()
-            }
-            Phase.END_HOLD -> {
-                if (--holdTicksLeft <= 0) {
-                    repeatsLeft--
-                    if (repeatsLeft <= 0) {
-                        finishIdle()
-                        return false
-                    }
-                    offsetPx = 0f
-                    applyScroll()
-                    phase = Phase.START_HOLD
-                    holdTicksLeft = (START_HOLD_MS / FRAME_MS).toInt()
-                }
-            }
-        }
-        return active
-    }
-
-    private fun applyScroll() {
-        val x = (if (rtl) -offsetPx else offsetPx).toInt()
-        if (scrollX != x) {
-            scrollTo(x, 0)
+        if (isAttachedToWindow) {
+            invalidate()
         }
     }
 
-    /**
-     * One shared timer for every scrolling label on screen. All active
-     * marquees advance on the same tick, so simultaneous labels (e.g. the
-     * panel's song/artist/album) coalesce into a single frame per step
-     * instead of three unaligned invalidations.
-     */
-    private object Ticker {
-        private val handler = Handler(Looper.getMainLooper())
-        private val views = ArrayList<ThrottledMarqueeTextView>(4)
-        private var running = false
-        private val step =
-            object : Runnable {
-                override fun run() {
-                    var i = 0
-                    while (i < views.size) {
-                        if (!views[i].tick()) {
-                            views.removeAt(i)
-                        } else {
-                            i++
-                        }
-                    }
-                    if (views.isEmpty()) {
-                        running = false
-                    } else {
-                        handler.postDelayed(this, FRAME_MS)
-                    }
-                }
-            }
-
-        fun add(view: ThrottledMarqueeTextView) {
-            if (view !in views) views.add(view)
-            if (!running) {
-                running = true
-                handler.postDelayed(step, FRAME_MS)
-            }
-        }
-
-        fun remove(view: ThrottledMarqueeTextView) {
-            views.remove(view)
-            if (views.isEmpty() && running) {
-                handler.removeCallbacks(step)
-                running = false
-            }
-        }
-    }
+    /** Natural completion: rest with an ellipsis, zero further redraws. */
+    private fun finishIdle() = stop()
 
     private companion object {
-        // ~25fps: visually smooth for a slow text crawl, but 2.5-5x fewer
-        // frames than the framework marquee (which renders at display vsync).
-        const val FRAME_MS = 40L
-        // Crawl speed. The framework default is ~30dp/s; keep it similar.
+        // Crawl speed; framework default is ~30dp/s.
         const val SPEED_DP_PER_SEC = 32f
-        // Full scroll cycles per activation, then fully idle.
+        // Full scroll passes per activation, then fully idle.
         const val REPEATS = 3
         const val START_HOLD_MS = 1200L
         const val END_HOLD_MS = 900L
         // Extra px scrolled past the end so the last glyph fully clears.
         const val EDGE_GAP_PX = 8f
+        // Stay under common GPU max texture sizes; absurdly long titles simply
+        // scroll through the first ~4k px.
+        const val MAX_BITMAP_WIDTH_PX = 4096
     }
 }
