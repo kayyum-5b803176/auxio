@@ -160,7 +160,10 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
     }
 
     private fun maybeStart() {
-        if (active || revealedForCurrentText || !isAttachedToWindow || width == 0) return
+        // In continuous-loop mode (REPEATS<=0) the reveal-once guard must not
+        // block re-arming; it only applies to finite reveal mode.
+        val revealGuard = REPEATS > 0 && revealedForCurrentText
+        if (active || revealGuard || !isAttachedToWindow || width == 0) return
         // Measuring the overflow needs the FULL text laid out on one unbounded
         // line: horizontallyScrolling=true (some styles only set maxLines=1,
         // which doesn't enable it) and no ellipsis. Both rebuild the layout,
@@ -245,8 +248,12 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
 
                         override fun onAnimationEnd(animation: Animator) {
                             if (canceled || !active) return
-                            repeatsLeft--
-                            if (repeatsLeft > 0) {
+                            // REPEATS <= 0 means loop forever (continuous
+                            // marquee): always schedule another pass. Otherwise
+                            // count down and rest after the last pass.
+                            val loopForever = REPEATS <= 0
+                            if (!loopForever) repeatsLeft--
+                            if (loopForever || repeatsLeft > 0) {
                                 // Hold at the end, then run the next pass.
                                 postDelayed(
                                     {
@@ -298,17 +305,15 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
         // but keeps the per-frame-redraw window to a few seconds instead of
         // continuous. (Set REPEATS higher / SPEED lower to trade CPU for more
         // scrolling; set REPEATS=0-equivalent by using a static ellipsis view.)
-        // MASTER SWITCH. false = fully static end-ellipsis title (ZERO per-
-        // frame redraw cost — the marquee never scrolls, never runs an
-        // animator, never invalidates). Set true to re-enable the brief
-        // scroll-once-then-rest reveal.
+        // MASTER SWITCH. false = static end-ellipsis title, zero per-frame cost.
         const val SCROLLING_ENABLED = false
 
-        const val SPEED_DP_PER_SEC = 48f
-        // A single full reveal per song, then rest.
-        const val REPEATS = 1
+        const val SPEED_DP_PER_SEC = 32f
+        // Number of scroll passes before resting. 0 or negative = loop FOREVER
+        // (continuous marquee).
+        const val REPEATS = 0
         const val START_HOLD_MS = 1500L
-        const val END_HOLD_MS = 600L
+        const val END_HOLD_MS = 1000L
         // Extra px scrolled past the end so the last glyph fully clears.
         const val EDGE_GAP_PX = 8f
         // Stay under common GPU max texture sizes; absurdly long titles simply

@@ -180,33 +180,24 @@ constructor(
                 // nothing here checked isPlaying; it only ever got replaced on
                 // the NEXT progression change. That wasted continuous CPU
                 // whenever the app was foregrounded with playback paused.
-                var tick = 0
+                var elapsed = 0L
                 while (progression.isPlaying) {
                     val posMs = progression.calculateElapsedPositionMs()
-                    // Only the Smart Chain tracker needs 100ms resolution (for
-                    // an accurate listened-fraction at song change). When the
-                    // plugin is off, every tick would be a no-op there, so
-                    // poll at the UI's own 300ms cadence instead - 3.3x fewer
-                    // coroutine wakeups, both foregrounded AND backgrounded
-                    // (this loop lives in viewModelScope and keeps running
-                    // while the app is in the background during playback).
-                    val fastTicks = playbackTracker.needsPositionTicks
-                    if (fastTicks) {
+                    val fast = playbackTracker.needsPositionTicks
+                    if (fast) {
                         playbackTracker.onPositionTick(posMs)
                     }
-                    // The UI (seek bar) only needs to visually move a few
-                    // times a second - reassigning a Material Slider's value
-                    // is expensive enough that doing it 10x/second measurably
-                    // costs real RenderThread time for no visible benefit
-                    // (nothing moves faster-looking above ~4x/second to the
-                    // eye). Update the UI-facing StateFlow at ~3.3Hz,
-                    // decoupled from the tracker's full-resolution tick.
-                    if (!fastTicks || tick % UI_POSITION_UPDATE_EVERY_N_TICKS == 0) {
+                    // STATIC-PAGE MODE: the seek thumb is the ONLY moving element
+                    // on the playback page. Update the UI at a low 1s cadence so
+                    // it still advances but triggers minimal redraws. If Smart
+                    // Chain needs fast ticks we still poll at 100ms for IT, but
+                    // only push the UI value once per SEEK_REFRESH_MS.
+                    if (!fast || elapsed % SEEK_REFRESH_MS == 0L) {
                         _positionDs.value = posMs.msToDs()
                     }
-                    tick++
-                    // 100ms resolution for the tracker, 300ms for UI-only.
-                    delay(if (fastTicks) 100 else 300)
+                    val step = if (fast) 100L else SEEK_REFRESH_MS
+                    delay(step)
+                    elapsed += step
                 }
             }
     }
@@ -681,10 +672,11 @@ constructor(
     }
 
     private companion object {
-        // Position ticks happen every 100ms (for the Smart Chain tracker's
-        // accuracy); the UI-facing position only needs to update a few times
-        // a second to look smooth. 3 -> every ~300ms (~3.3Hz).
-        const val UI_POSITION_UPDATE_EVERY_N_TICKS = 3
+        // STATIC-PAGE MODE: UI seek position update cadence. 1000ms = the thumb
+        // steps once per second (the only moving element on an otherwise static
+        // page). Must be a multiple of 100 (the tracker tick) for the modulo
+        // gating above to line up.
+        const val SEEK_REFRESH_MS = 1000L
     }
 }
 

@@ -11,8 +11,7 @@
         android:layout_height="wrap_content"
         android:layout_marginBottom="@dimen/spacing_medium"
         android:valueFrom="0"
-        android:valueTo="1"
-        app:labelBehavior="gone" />
+        android:valueTo="1" />
 
     <TextView
         android:id="@+id/seek_bar_position"

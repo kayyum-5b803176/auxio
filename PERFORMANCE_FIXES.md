@@ -1,5 +1,83 @@
 # Performance fixes (foreground CPU 99–201% -> expected near-idle)
 
+## v5.2.2 — maximum-static mode (all continuous animation off, slow seek)
+
+Per user request: disable every continuous foreground animation, keep only the
+seek slider moving, at a low refresh rate — so the page is otherwise fully
+static while foregrounded. Isolates/eliminates all per-frame UI redraw cost.
+
+ - Marquee: SCROLLING_ENABLED=false (static end-ellipsis).
+ - Playing indicator: ANIMATE_PLAYING_INDICATOR=false in CoverView — shows a
+   STATIC first frame (playingDrawable.selectDrawable(0)) instead of running the
+   30-frame/20fps animation. Indicator still visible, just frozen.
+ - Seek: PlaybackViewModel UI position now updates once per SEEK_REFRESH_MS
+   (1000ms) — thumb steps 1x/sec, the only moving element. Smart Chain tracker
+   still gets 100ms ticks if enabled, but the UI value is pushed only 1x/sec.
+
+Event-triggered animations (button ripple, speed-dial expand, selection fade)
+are LEFT ENABLED — they fire once on interaction and finish, contributing
+nothing to steady-state playback CPU; disabling them would kill touch feedback
+for no idle benefit.
+
+All three are single-constant switches to re-enable later:
+ThrottledMarqueeTextView.SCROLLING_ENABLED, CoverView.ANIMATE_PLAYING_INDICATOR,
+PlaybackViewModel.SEEK_REFRESH_MS.
+
+
+## v5.2.1 — the "bar animation" (playing indicator) is the foreground cost
+
+Decisive user observations: (1) CPU drops to 28% when BACKGROUNDED, is 51% on
+ANY foreground page (home OR player), (2) the equalizer "bar animation" (playing
+indicator) spikes CPU a lot when visible on the queue/home tab. Combined with
+earlier facts (pause -> idle; VLC same file -> flat 18%), this points away from
+audio and at a continuously-animating drawable that redraws while visible.
+
+Cause: ic_playing_indicator_24 is a 30-frame AnimationDrawable where EVERY frame
+is a full VectorDrawable. Played directly, Android re-rasterizes a vector path
+from scratch every frame (20fps, continuously while playing) and invalidates the
+host view each time -> continuous full-surface redraw on the home/queue lists and
+player page. Backgrounded = nothing draws = 28%; foreground with the indicator
+visible = the redraw storm = 51%; paused = indicator stops = idle. VLC has no
+such animation = flat 18%. This is the ~23pp foreground delta.
+
+(Earlier accounting was right that the player-vs-settings delta was rendering,
+but I mis-attributed it to marquee/seek; the dominant piece is this indicator,
+which is ALSO on the home/queue lists — explaining why it's high on home too,
+not just the player page.)
+
+Fix: new BitmapAnimationDrawable.rasterize() pre-rasterizes the 30 vector frames
+into cached bitmaps ONCE (at 96dp for crispness), and CoverView plays that
+instead of the raw vector AnimationDrawable. Each frame is now a cheap bitmap
+blit rather than a fresh path rasterization. Falls back to the original on OOM.
+
+CAVEAT: the animation still invalidates ~20x/sec (inherent to frame animation),
+so cost drops a lot but not to zero. If more is needed, next levers are frame
+rate (50->100ms) or scoping invalidation to the indicator's own bounds.
+
+
+## v5.2.0 — restore smooth continuous marquee + smooth seek
+
+Per user request: the v5.1.9 sync-adapter change did NOT reduce the ~50%
+playback CPU (ExoPlayer overhead vs VLC's 18% is deeper than adapter mode).
+Stopping the playback-CPU chase for now; kept all prior optimizations in place
+and RESTORED the two UI behaviors that earlier CPU experiments had degraded:
+
+ - ThrottledMarqueeTextView: SCROLLING_ENABLED=true, REPEATS=0 (loop forever) —
+   smooth continuous scrolling marquee again (was static ellipsis in 5.1.8, or
+   scroll-once in 5.1.7). onAnimationEnd loops indefinitely when REPEATS<=0; the
+   reveal-once guard is bypassed in loop mode.
+ - PlaybackViewModel position loop: UI position updates every 100ms again (was
+   throttled to 300ms) for a smooth-moving seek thumb. Position is deci-second
+   granularity so 100ms is the finest meaningful cadence.
+ - view_seek_bar.xml: restored the Slider's default floating label.
+
+NOTE: continuous scroll inherently redraws every frame while scrolling — this
+is a deliberate UI-quality choice, accepted by the user, independent of the
+playback-decode CPU (which VLC comparison shows is ExoPlayer path overhead still
+to be investigated separately). The no-op value guard in StyledSeekBar is kept
+(it only skips identical values, doesn't affect smoothness).
+
+
 ## v5.1.9 — NOT a hardware floor: VLC plays the same file at 18%
 
 Critical control: VLC plays the SAME AAC file on the SAME device at a flat 18%,

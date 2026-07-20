@@ -149,8 +149,18 @@ constructor(context: Context, attrs: AttributeSet? = null, @AttrRes defStyleAttr
                         ImageViewCompat.setImageTintList(
                             this, context.getColorCompat(R.color.sel_on_cover_bg))
                     },
-                    context.getDrawableCompat(R.drawable.ic_playing_indicator_24)
-                        as AnimationDrawable,
+                    // Pre-rasterize the 30-frame VECTOR playing indicator into
+                    // cached bitmap frames once. Played as a vector animation it
+                    // re-rasterizes a path every frame at 20fps while music
+                    // plays, invalidating the host view each time — a large
+                    // foreground-only CPU cost on the home/queue lists and player
+                    // page (the "bar animation" spike). As bitmap frames, each
+                    // frame swap is a cheap blit.
+                    BitmapAnimationDrawable.rasterizeDp(
+                        context,
+                        context.getDrawableCompat(R.drawable.ic_playing_indicator_24)
+                            as AnimationDrawable,
+                        PLAYING_INDICATOR_SIZE_DP),
                     context.getDrawableCompat(R.drawable.ic_paused_indicator_24))
             } else {
                 null
@@ -258,7 +268,16 @@ constructor(context: Context, attrs: AttributeSet? = null, @AttrRes defStyleAttr
     fun setPlaying(isPlaying: Boolean) {
         playbackIndicator?.run {
             if (isPlaying) {
-                playingDrawable.start()
+                // ANIMATIONS DISABLED: show a static playing indicator instead of
+                // running the 20fps frame animation (which continuously
+                // re-rasterizes/invalidates and was a large foreground CPU cost).
+                // Freeze on the first frame so the indicator is still visible.
+                if (ANIMATE_PLAYING_INDICATOR) {
+                    playingDrawable.start()
+                } else {
+                    playingDrawable.stop()
+                    playingDrawable.selectDrawable(0)
+                }
                 view.setImageDrawable(playingDrawable)
             } else {
                 playingDrawable.stop()
@@ -434,5 +453,18 @@ constructor(context: Context, attrs: AttributeSet? = null, @AttrRes defStyleAttr
         }
 
         override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
+
+    private companion object {
+        // Master switch for the playing-indicator frame animation. false =
+        // static indicator (no per-frame redraw). See setPlaying.
+        const val ANIMATE_PLAYING_INDICATOR = false
+
+        // Resolution to pre-rasterize the playing-indicator frames at. The
+        // vector is 24dp but can be scaled up inside larger covers, so
+        // rasterize at a higher size to stay crisp. Frames are tiny (a few KB
+        // each) so 30 of them is negligible memory, and the CPU win from not
+        // re-rasterizing vectors every frame is large.
+        const val PLAYING_INDICATOR_SIZE_DP = 96
     }
 }
