@@ -98,13 +98,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private var lastInsetLeft = Int.MIN_VALUE
+    private var lastInsetRight = Int.MIN_VALUE
+
     private fun setupEdgeToEdge(contentView: View) {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         contentView.setOnApplyWindowInsetsListener { view, insets ->
             // Automatically inset the view to the left/right, as component support for
             // these insets are highly lacking.
             val bars = insets.systemBarInsetsCompat
-            view.updatePadding(left = bars.left, right = bars.right)
+            // updatePadding() calls requestLayout() whenever it's invoked with a
+            // changed value, and this listener fires on EVERY inset dispatch —
+            // which the bottom-sheet behaviors trigger repeatedly during
+            // transitions. Re-applying identical padding each time kept kicking
+            // off full layout + inset passes across the whole view tree (seen in
+            // profiling as a storm of onApplyWindowInsets / onLayoutChild /
+            // applyWindowInsets frames during playback). Only touch padding when
+            // the horizontal insets actually change.
+            if (bars.left != lastInsetLeft || bars.right != lastInsetRight) {
+                lastInsetLeft = bars.left
+                lastInsetRight = bars.right
+                view.updatePadding(left = bars.left, right = bars.right)
+            }
             insets
         }
     }

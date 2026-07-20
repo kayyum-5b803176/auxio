@@ -1,5 +1,33 @@
 # Performance fixes (foreground CPU 99–201% -> expected near-idle)
 
+## v5.1.4 — playback CPU bump (27% -> 51%) analysis
+
+Two sampled simpleperf traces at the two load levels during the SAME playback,
+diffed by callchain-frame presence. What grew from 27% to 51%:
+ - The MediaCodec/CCodec buffer pipeline roughly doubled (feedInputBuffer
+   2.2->3.7, onReleaseOutputBuffer 1.2->2.5, sendOutputBuffers, C2 buffer
+   alloc/map). NOTE: shouldContinueLoading/doSomeWork did NOT grow, so this is
+   raw buffer THROUGHPUT (front-loading the buffer), not the LoadControl
+   deciding to load more — i.e. framework buffer-fill, not app-fixable.
+ - A window-insets + bottom-sheet LAYOUT pass appeared that is nearly absent at
+   27%: MainActivity.setupEdgeToEdge inset listener, BottomSheetContentBehavior
+   .onLayoutChild/layoutContent, {Playback,Queue,Base}BottomSheetBehavior
+   .applyWindowInsets, EdgeFrameLayout/RecyclerView.onApplyWindowInsets,
+   replaceSystemBarInsetsCompat. This is app-code and IS fixable.
+
+Fix (MainActivity.setupEdgeToEdge): the OnApplyWindowInsetsListener called
+view.updatePadding() on every inset dispatch, and updatePadding() triggers
+requestLayout() — during sheet transitions the behaviors re-dispatch insets
+repeatedly, so identical padding was re-applied over and over, each time kicking
+a full layout+inset pass across the tree. Now padding is only updated when the
+horizontal inset values actually change.
+
+HONEST CAVEAT: a sampled profile shows where time goes, not what called
+requestLayout. It's possible the 51% capture caught the sheet mid-transition
+(legitimately busier) rather than a storm. This fix + the r8 onPreDraw early-out
+both reduce per-frame UI work during playback; the decode doubling is framework
+buffering. Re-measure to confirm the delta.
+
 ## Round 8 — DEFINITIVE: idle CPU root cause from a simpleperf sampled profile
 
 A sampled (non-overflowing) simpleperf capture while idle finally named it.
