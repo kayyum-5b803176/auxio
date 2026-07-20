@@ -124,6 +124,12 @@ class MainFragment :
     private var lastPlaybackPanelAlpha: Float? = null
     private var lastQueueFragmentAlpha: Float? = null
     private var lastQueueSheetAlpha: Float? = null
+    // PERF: track the last sheet slide offsets so onPreDraw can skip its whole
+    // body while both sheets are settled (see onPreDraw). -1 = "not yet applied"
+    // so the first real frame always runs.
+    private var lastComputedPlaybackRatio: Float = -1f
+    private var lastComputedQueueRatio: Float = -1f
+    private var settledFrameApplied: Boolean = false
     private var maxScaleXDistance = 0f
 
     // Only marquee-scroll a bar/panel while it's actually visible - both stay
@@ -172,6 +178,10 @@ class MainFragment :
         lastPlaybackPanelAlpha = null
         lastQueueFragmentAlpha = null
         lastQueueSheetAlpha = null
+        // Force a full onPreDraw apply against the fresh view.
+        lastComputedPlaybackRatio = -1f
+        lastComputedQueueRatio = -1f
+        settledFrameApplied = false
 
         val playbackSheetBehavior =
             binding.playbackSheet.coordinatorLayoutBehavior as PlaybackBottomSheetBehavior
@@ -551,6 +561,31 @@ class MainFragment :
             binding.queueSheet.coordinatorLayoutBehavior as QueueBottomSheetBehavior?
 
         val playbackRatio = max(playbackSheetBehavior.calculateSlideOffset(), 0f)
+        val queueRatioRaw =
+            if (queueSheetBehavior != null) max(queueSheetBehavior.calculateSlideOffset(), 0f)
+            else 0f
+        // PERF: onPreDraw fires on EVERY frame the window draws, and returning
+        // true keeps it firing. All the work below is sheet-transition math that
+        // only changes while a sheet is actually sliding. When both sheets are
+        // settled (their slide offsets are identical to last frame), every
+        // "if (x != last)" setter guard below would no-op anyway — but simply
+        // running this method every frame, reading offsets and touching the
+        // behaviors, was enough to keep the main thread + RenderThread awake at
+        // ~idle (confirmed by a simpleperf capture: MainFragment.onPreDraw was
+        // the top app frame, with RenderThread at ~25% redrawing VectorDrawables
+        // every vsync). So: once settled, skip the body entirely for one frame.
+        // We still return true (stay registered) so the NEXT real interaction is
+        // caught; when offsets start changing again the body runs normally.
+        if (playbackRatio == lastComputedPlaybackRatio &&
+            queueRatioRaw == lastComputedQueueRatio &&
+            settledFrameApplied) {
+            return true
+        }
+        lastComputedPlaybackRatio = playbackRatio
+        lastComputedQueueRatio = queueRatioRaw
+        // We're about to fully apply this frame; allow the fast-path skip on the
+        // next frame if offsets stay put.
+        settledFrameApplied = true
         // Stupid hack to prevent you from sliding the sheet up without closing the speed
         // dial. Filtering out ACTION_MOVE events will cause back gestures to close the
         // speed dial, which is super finicky behavior.

@@ -1,5 +1,38 @@
 # Performance fixes (foreground CPU 99–201% -> expected near-idle)
 
+## Round 8 — DEFINITIVE: idle CPU root cause from a simpleperf sampled profile
+
+A sampled (non-overflowing) simpleperf capture while idle finally named it.
+7,316 samples: 69.5% on the main thread, 24.8% on RenderThread. Top of stack
+was dominated by the UI RENDER pipeline running every vsync:
+RenderNode::prepareTreeImpl, updateDisplayListIfDirty, onDescendantInvalidated,
+Choreographer.doFrame, and repeated VectorDrawable.draw/getAlpha. The top
+APP-CODE frame across all callchains was MainFragment.onPreDraw (by a wide
+margin), followed by CoordinatorAppBarLayout.onPreDraw$lambda$0.
+
+Root cause: MainFragment registers an OnPreDrawListener that recomputes ALL
+bottom-sheet transition math (playback + queue slide offsets, alphas, corners,
+scrims, translationZ) on EVERY frame and returns true (staying registered).
+The fork had already guarded each setter with "if (x != last)", so at rest no
+setters fire — but the method still ran every frame and kept the view tree
+drawing, which kept RenderThread compositing (~25%) and re-drawing the vector
+drawables in the tree every vsync. That's the constant ~20-28% idle cost.
+
+Fix (MainFragment.onPreDraw): cache the playback + queue slide offsets; when
+both are identical to the previous frame AND a full frame has already been
+applied at this resting position, skip the entire body for that frame (still
+return true so the next real interaction is caught). During any real sheet
+animation the offsets change every frame, so the body runs normally; the
+resting position is always fully applied exactly once before skipping begins.
+Cache is reset in onBindingCreated so a fresh view always gets a full apply
+(preserving the existing fresh-binding-must-reapply fix).
+
+Combined with the round-7 CoordinatorAppBarLayout guard, this removes the
+per-frame app-code work that was keeping the frame pipeline awake at idle. The
+playing-indicator AnimationDrawable already stops correctly on pause; its
+frames in the trace were the onPreDraw-forced full-tree redraws, so no change
+there.
+
 ## Round 7 — THE idle-CPU bug, found in an ART method trace
 
 User captured a method trace with NOTHING PLAYING but CPU pinned at 17-20%
