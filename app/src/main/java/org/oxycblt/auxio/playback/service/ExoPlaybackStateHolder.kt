@@ -727,20 +727,20 @@ class ExoPlaybackStateHolder(
             val exoPlayer =
                 ExoPlayer.Builder(context, audioRenderer)
                     .setMediaSourceFactory(mediaSourceFactory)
-                    // Local files have no network latency to mask, so ExoPlayer's
-                    // default ~50s max buffer just makes the decoder front-load a
-                    // huge chunk right after playback starts — the "sits at ~22%,
-                    // then ramps to ~50% for a few seconds with nothing touched"
-                    // symptom (top showed ExoPlayer:Playback + MediaCodec_loop
-                    // roughly doubling, no other thread involved). A small buffer
-                    // is plenty for gapless local playback and keeps decode work
-                    // spread thin instead of bursty. Keep min<=max and the two
-                    // playback-start thresholds well under min.
+                    // Local files: no network to mask, so we don't need the
+                    // default ~50s buffer (which front-loads a big decode burst
+                    // at playback start). But too SMALL a buffer is also bad —
+                    // it refills constantly, so DefaultLoadControl.shouldContinue
+                    // Loading keeps flipping true and the decoder never fully
+                    // goes idle (seen in profiling as dequeueInputBufferIndex /
+                    // feedInputBuffer running even while paused). A moderate
+                    // buffer fills once shortly after start, then the decoder
+                    // sleeps until it drains — lowest steady-state CPU.
                     .setLoadControl(
                         DefaultLoadControl.Builder()
                             .setBufferDurationsMs(
-                                /* minBufferMs= */ 5_000,
-                                /* maxBufferMs= */ 15_000,
+                                /* minBufferMs= */ 15_000,
+                                /* maxBufferMs= */ 30_000,
                                 /* bufferForPlaybackMs= */ 1_000,
                                 /* bufferForPlaybackAfterRebufferMs= */ 2_000)
                             .setPrioritizeTimeOverSizeThresholds(true)

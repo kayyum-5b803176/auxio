@@ -1,5 +1,36 @@
 # Performance fixes (foreground CPU 99–201% -> expected near-idle)
 
+## Round 7 — THE idle-CPU bug, found in an ART method trace
+
+User captured a method trace with NOTHING PLAYING but CPU pinned at 17-20%
+(main thread 12.5%, RenderThread 5.3%). Parsed 30k events; the main thread's
+exclusive time was dominated by two things:
+
+1. A PER-FRAME UI RELAYOUT LOOP. CoordinatorAppBarLayout registered an
+   OnPreDrawListener that ran a full CoordinatorLayout.onNestedPreScroll (rect
+   math across the child tree, via ContinuousAppBarLayoutBehavior) on EVERY
+   frame, unconditionally and forever. The trace showed onPreDraw$lambda$0 +
+   CoordinatorLayout.getChildRect/getDescendantRect/offsetDescendantMatrix +
+   AppBarLayout.onNestedPreScroll firing through Choreographer.onVsync while
+   idle. Returning true from onPreDraw keeps the listener registered, so this
+   was a permanent per-frame tax that also kept RenderThread busy.
+   Fix (CoordinatorAppBarLayout): only run onNestedPreScroll when the scrolling
+   child's scroll OFFSET or content RANGE actually changed (range covers
+   data-driven lift changes, the original reason it ran every frame). Forced
+   recomputes (setLiftOnScrollTargetViewId) reset the cache so they still fire.
+
+2. EXOPLAYER DECODING WHILE PAUSED. Same trace showed dequeueInputBufferIndex
+   (16.8%), MediaCodecRenderer.feedInputBuffer, DefaultAudioSink.drainOutput
+   Buffer, and DefaultLoadControl.shouldContinueLoading active with nothing
+   playing. The round-5 tiny buffer (5/15s) made this WORSE: too small a buffer
+   refills constantly so the load control never lets the decoder sleep. Raised
+   to 15/30s so the buffer fills once after start then goes quiet — lowest
+   steady-state. (The per-frame loop in #1 also kept the message loop hot,
+   which kept the load control being polled; fixing #1 helps here too.)
+
+These are the real "constant CPU while idle" causes — distinct from the audio
+decode floor. Both fixes are in app code and safe.
+
 ## Round 6 — narrowing to the audio-processing path
 
 top after round 5 showed decode CPU UNCHANGED (ExoPlayer:Playback ~13%,

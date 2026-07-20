@@ -51,14 +51,35 @@ constructor(context: Context, attrs: AttributeSet? = null, @AttrRes defStyleAttr
     private var scrollingChild: View? = null
 
     private val tConsumed = IntArray(2)
+    // The last vertical scroll position we reacted to. The OnPreDrawListener
+    // fires on EVERY frame the view tree draws, and previously ran a full
+    // CoordinatorLayout onNestedPreScroll (rect math over the whole child tree)
+    // unconditionally each time — a permanent per-frame cost that kept the main
+    // thread and RenderThread busy even while idle (visible in profiling as
+    // onPreDraw$lambda$0 + CoordinatorLayout.getChildRect/getDescendantRect via
+    // Choreographer.onVsync). The lift/expansion state only needs recomputing
+    // when the scrolling child's position actually changed, so short-circuit
+    // when it hasn't.
+    private var lastScrollY = Int.MIN_VALUE
+    private var lastScrollRange = Int.MIN_VALUE
     private val onPreDraw =
         ViewTreeObserver.OnPreDrawListener {
             val child = findScrollingChild()
 
             if (child != null) {
-                val coordinator = parent as CoordinatorLayout
-                coordinatorLayoutBehavior?.onNestedPreScroll(
-                    coordinator, this, coordinator, 0, 0, tConsumed, 0)
+                val rv = child as? RecyclerView
+                val scrollY = rv?.computeVerticalScrollOffset() ?: child.scrollY
+                // Content extent — changes when list data changes even without a
+                // scroll, so the lift state still updates on data changes (the
+                // original reason this ran every frame).
+                val scrollRange = rv?.computeVerticalScrollRange() ?: 0
+                if (scrollY != lastScrollY || scrollRange != lastScrollRange) {
+                    lastScrollY = scrollY
+                    lastScrollRange = scrollRange
+                    val coordinator = parent as CoordinatorLayout
+                    coordinatorLayoutBehavior?.onNestedPreScroll(
+                        coordinator, this, coordinator, 0, 0, tConsumed, 0)
+                }
             }
 
             true
@@ -92,6 +113,9 @@ constructor(context: Context, attrs: AttributeSet? = null, @AttrRes defStyleAttr
         // Sometimes we dynamically set the scrolling child [such as in HomeFragment], so clear it
         // and re-draw when that occurs.
         scrollingChild = null
+        // Force the guarded onPreDraw to actually recompute next pass.
+        lastScrollY = Int.MIN_VALUE
+        lastScrollRange = Int.MIN_VALUE
         onPreDraw.onPreDraw()
     }
 
