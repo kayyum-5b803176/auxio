@@ -18,7 +18,7 @@ android {
 
     defaultConfig {
         applicationId namespace
-        versionName "5.0.2"
+        versionName "5.1.1"
         versionCode 70
 
         minSdk min_sdk
@@ -53,7 +53,6 @@ android {
                 includeInApk = false
                 includeInBundle = false
             }
-            signingConfig signingConfigs.debug
         }
     }
 

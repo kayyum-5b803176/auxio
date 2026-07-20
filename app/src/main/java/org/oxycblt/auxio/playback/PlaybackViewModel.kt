@@ -162,9 +162,12 @@ constructor(
     }
 
     override fun onProgressionChanged(progression: Progression) {
-        L.d("Player state changed, starting new position polling")
         _isPlaying.value = progression.isPlaying
-        playbackTracker.onProgression()
+        // NOTE: playbackTracker.onProgression() is intentionally NOT called
+        // here. The tracker is a @Singleton and PlaybackServiceFragment already
+        // forwards every progression change to it; calling it here too meant
+        // the entire tracker path (played-time accounting, plugin-flag reads,
+        // and any embedding work it triggers) ran TWICE per event.
         // Still need to update the position now due to co-routine launch delays
         _positionDs.value = progression.calculateElapsedPositionMs().msToDs()
         // Replace the previous position co-routine with a new one that uses the new

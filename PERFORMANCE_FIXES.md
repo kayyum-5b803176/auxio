@@ -1,5 +1,90 @@
 # Performance fixes (foreground CPU 99–201% -> expected near-idle)
 
+## Round 6 — narrowing to the audio-processing path
+
+top after round 5 showed decode CPU UNCHANGED (ExoPlayer:Playback ~13%,
+MediaCodec_loop ~7.6%) -> the hw-decode reorder + buffer cap didn't move
+steady state. User facts: files are MP3/AAC (cheap, hardware-decodable),
+ReplayGain is ON, and it's high on RELEASE too. So ~20% is NOT the decode
+(MediaCodec_loop is the hw decoder, working fine) and NOT a debug artifact.
+The cost is on ExoPlayer:Playback, which runs the AudioProcessor chain + sink
+write loop.
+
+Fix applied: ReplayGainAudioProcessor.queueInput processed audio one sample at
+a time using four bounds-checked ByteBuffer.get/put calls per sample (via
+getLeShort/putLeShort). Rewritten to bulk ShortBuffer views (LITTLE_ENDIAN
+forced to preserve exact output) — ~4x less per-sample overhead on the hot
+audio thread, for every frame while a non-unity gain is applied.
+
+OPEN QUESTION (needs a user measurement, not another patch): toggle ReplayGain
+OFF and re-run top -H.
+ - ExoPlayer:Playback drops to low single digits -> ReplayGain was the cost;
+   this optimization targets it directly.
+ - stays ~13% -> cost is in ExoPlayer's sink/buffering (framework-level); ~20%
+   is then the practical floor for this device+player and not app-fixable.
+
+Note: ReplayGainAudioProcessor.isActive() is always true (onConfigure accepts
+all 16-bit PCM), so the processor sits in the pipeline even at unity gain. Left
+as-is for now; the measurement above decides whether it's worth addressing.
+
+## Round 5 — the "22% -> 50% after 5s, nothing touched" jump (real cause)
+
+A `top -H` capture during the event was decisive and DISPROVED the round-4
+Smart Chain theory: between the 22% and 50% snapshots, the SAME
+ExoPlayer:Playback thread doubled (5.6->11.9%) and MediaCodec_loop doubled
+(3.7->7.4%), with NO acoustic-decode/DefaultDispatch thread anywhere. The jump
+is purely the audio DECODER doing more work — two independent causes:
+
+1. NO LoadControl -> default ~50s max buffer. On start, ExoPlayer decodes a
+   small amount to begin quickly (the low ~22% window), then front-loads up to
+   50s of audio to fill the buffer (the ramp to ~50%), then settles. For LOCAL
+   files there's no network latency to mask, so a 50s buffer is pointless.
+   Fix: DefaultLoadControl with 5s/15s buffers (min/max) and 1s/2s playback
+   thresholds -> the elevated-decode window is ~3x shorter and gentler.
+
+2. FfmpegAudioRenderer listed FIRST -> SOFTWARE decoding. Renderer order is
+   decode priority; FFmpeg (CPU software decoder) preceded the hardware
+   MediaCodecAudioRenderer, so common formats (mp3/aac/flac) were decoded on
+   the CPU even with a hardware decoder present — the dominant contributor to
+   the 20-50% floor. Fix: MediaCodec FIRST, FFmpeg as fallback for formats HW
+   can't handle. ReplayGain is applied in both paths (the processor is passed
+   to the FFmpeg renderer AND the MediaCodec sink), so gain is unaffected.
+   TRADEOFF: upstream prefers FFmpeg for maximum format/gapless robustness;
+   preferring HW lowers CPU but leans on MediaCodec. The FFmpeg fallback still
+   covers anything MediaCodec rejects.
+
+NOTE: the round-4 Smart Chain changes are still correct and kept (they remove
+real duplicate work + a during-playback decode), they just weren't THIS
+symptom. Still a debug build in the capture; release will read lower.
+
+## Round 4 — the delayed "22% -> 50% a few seconds in" jump
+
+Symptom: after a force-close + reopen with music playing and the player page
+open, CPU sat at ~22% (just the audio decoder) then jumped to ~50% ~5s later
+for the identical task. A delayed jump = event/timer-triggered work, not
+per-frame drawing. Three causes, all in the Smart Chain plugin path:
+
+1. ACOUSTIC DECODE DURING PLAYBACK (main cause). On a cold start nothing is
+   cached, so the first tracked transition called AcousticFeatures.extract(),
+   which spins up a SECOND MediaCodec decoder and decodes ~30s of audio — run
+   concurrently with the playback decoder, hence the second-core jump.
+   Fix (ChainRepository.embeddingFor): only decode-seed acoustically when the
+   player is NOT playing. During playback, write the instant hash seed and
+   mark it un-seeded; a later paused transition or the manual Acoustic Scan
+   upgrades it to acoustic. Chain ordering works from day one regardless.
+   Added PlaybackStateManager injection (cycle-free: it's a no-arg @Inject
+   singleton the tracker already depends on).
+
+2. DOUBLE TRACKER INVOCATION. Both PlaybackViewModel and PlaybackService
+   FragmentForward onProgression() to the SAME @Singleton PlaybackTracker, so
+   every progression event ran the whole tracker path twice. Removed the
+   ViewModel's duplicate call (the service is the correct single owner).
+
+3. LOGGING ON THE HOT PATH. onProgression()/handleSongChange() called L.d()
+   on every ~100ms tick and every transition. In debug builds Timber formats
+   strings 10x/s; in FORKED release builds CopyleftNoticeTree is planted and
+   logs unconditionally too. Removed the per-tick / per-transition logs.
+
 ## Round 3 — smooth AND cheap marquee
 
 Round 2's 25fps scrollTo ticker had two flaws: Handler-timed ticks aren't

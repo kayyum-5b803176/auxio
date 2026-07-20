@@ -179,19 +179,13 @@ constructor(
      */
     fun onProgression() {
         if (!pluginSettings.smartChainEnabled) {
-            L.d("SmartChain: onProgression ignored (disabled)")
             return
         }
-        val song = playbackManager.currentSong
-        if (song == null) {
-            L.d("SmartChain: onProgression — currentSong is null")
-            return
-        }
+        val song = playbackManager.currentSong ?: return
         if (song == currentSong) {
             syncPlaying(playbackManager.progression.isPlaying)
             lastPositionMs = playbackManager.progression.calculateElapsedPositionMs()
         } else {
-            L.d("SmartChain: onProgression detected song change to ${song.path.name}")
             handleSongChange(song)
         }
     }
@@ -233,9 +227,6 @@ constructor(
 
     private fun handleSongChange(newSong: Song) {
         val previous = currentSong
-        L.d(
-            "SmartChain: handleSongChange prev=${previous?.path?.name} " +
-                "new=${newSong.path.name} lastPos=${lastPositionMs}ms")
         // Same song still playing — nothing changed; just refresh position.
         if (previous == newSong) {
             lastPositionMs = playbackManager.progression.calculateElapsedPositionMs()
@@ -243,7 +234,6 @@ constructor(
         }
 
         val intent = consumeIntent()
-        L.d("SmartChain: transition ${previous?.path?.name} -> ${newSong.path.name}, intent=$intent")
 
         // The outgoing song was playing right up to this transition; fold the
         // in-flight interval so playedMs is complete before we measure it.

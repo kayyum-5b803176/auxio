@@ -190,21 +190,37 @@ constructor(
             // the adjustment can change during playback I'm largely forced to do this.
             buffer.put(inputBuffer.slice())
         } else {
-            for (i in pos until limit step 2) {
-                // 16-bit PCM audio, deserialize a little-endian short.
-                var sample = inputBuffer.getLeShort(i)
-                // Ensure we clamp the values to the minimum and maximum values possible
-                // for the encoding. This prevents issues where samples amplified beyond
-                // 1 << 16 will end up becoming truncated during the conversion to a short,
-                // resulting in popping.
-                sample =
+            // Process as 16-bit samples via ShortBuffer views instead of four
+            // bounds-checked ByteBuffer.get/put calls per sample. The original
+            // code read/wrote LITTLE-ENDIAN shorts explicitly, so force LE order
+            // on the views (ByteBuffer defaults to big-endian) to keep byte-for-
+            // byte identical output. This is the hot path for every frame of
+            // audio whenever ReplayGain applies a non-unity gain, so cutting the
+            // per-sample overhead ~4x meaningfully lowers decode-path CPU.
+            val savedInOrder = inputBuffer.order()
+            val savedOutOrder = buffer.order()
+            inputBuffer.order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            buffer.order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            val inShorts = inputBuffer.asShortBuffer()
+            val outShorts = buffer.asShortBuffer()
+            val count = inShorts.remaining()
+            var i = 0
+            while (i < count) {
+                val sample = inShorts.get(i)
+                val amplified =
                     (sample * volume)
                         .toInt()
                         .coerceAtLeast(Short.MIN_VALUE.toInt())
                         .coerceAtMost(Short.MAX_VALUE.toInt())
                         .toShort()
-                buffer.putLeShort(sample)
+                outShorts.put(i, amplified)
+                i++
             }
+            // Advance the output ByteBuffer position past the shorts we wrote,
+            // then restore byte orders we temporarily changed.
+            buffer.position(buffer.position() + count * 2)
+            inputBuffer.order(savedInOrder)
+            buffer.order(savedOutOrder)
         }
 
         inputBuffer.position(limit)

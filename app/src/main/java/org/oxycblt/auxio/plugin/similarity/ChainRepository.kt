@@ -132,7 +132,8 @@ constructor(
     private val transitionDao: TransitionDao,
     private val acousticFeatures: AcousticFeatures,
     private val pluginSettings: PluginSettings,
-    private val chainLog: ChainLog
+    private val chainLog: ChainLog,
+    private val playbackManager: org.oxycblt.auxio.playback.state.PlaybackStateManager
 ) : ChainRepository {
 
     // ---- key resolution (fingerprint, uid: fallback) --------------------
@@ -181,17 +182,37 @@ constructor(
     }
 
     private suspend fun embeddingFor(song: Song, key: String, now: Long): SongEmbedding {
-        embeddingDao.get(key)?.let {
-            return it
+        val cached = embeddingDao.get(key)
+        val allowAcoustic = !playbackManager.progression.isPlaying
+        // Reuse the cache UNLESS it's only a cheap hash seed AND we're now idle
+        // (so we can afford to upgrade it to a real acoustic seed in the
+        // background). During playback we always reuse whatever we have.
+        if (cached != null && (cached.acousticSeeded || !allowAcoustic)) {
+            return cached
         }
-        // Prefer an ACOUSTIC seed (grounded in how the song sounds); this decodes
-        // audio, so it runs once here and is then persisted. Fall back to the
-        // cheap artist/genre-hash seed if extraction fails (DRM, codec, etc.).
+        // Acoustic extraction spins up a SECOND MediaCodec decoder and decodes
+        // ~30s of audio. Doing that during live playback means two hardware/
+        // software decoders run at once, competing for CPU with the playback
+        // decoder — this was the "starts at ~22%, jumps to ~50% a few seconds
+        // in" symptom right after a cold start, when nothing is cached yet and
+        // every transition tried to decode-seed on the spot.
+        //
+        // So: only decode-seed acoustically when the player is NOT actively
+        // playing. During playback, write the cheap hash seed immediately
+        // (zero decode) and mark it un-seeded; the manual Acoustic Scan — or a
+        // later transition computed while paused — upgrades it to an acoustic
+        // seed. Chain ordering still works from day one; it just gets more
+        // acoustically accurate once seeded, exactly as before.
+        // (see the play-state gate above)
         val acoustic =
-            try {
-                acousticFeatures.extract(song.uri, song.durationMs)
-            } catch (e: Exception) {
-                L.e("SmartChain: acoustic seed failed, using hash seed: $e")
+            if (allowAcoustic) {
+                try {
+                    acousticFeatures.extract(song.uri, song.durationMs)
+                } catch (e: Exception) {
+                    L.e("SmartChain: acoustic seed failed, using hash seed: $e")
+                    null
+                }
+            } else {
                 null
             }
         val acousticOk = acoustic != null && acoustic.size == DIMENSIONS

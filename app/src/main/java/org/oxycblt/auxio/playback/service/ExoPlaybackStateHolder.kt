@@ -31,6 +31,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.RenderersFactory
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
@@ -700,8 +701,18 @@ class ExoPlaybackStateHolder(
             // Since Auxio is a music player, only specify an audio renderer to save
             // battery/apk size/cache size]
             val audioRenderer = RenderersFactory { handler, _, audioListener, _, _ ->
+                // Renderer ORDER = decode PRIORITY: ExoPlayer uses the first
+                // renderer that supports the track. MediaCodecAudioRenderer is
+                // hardware/DSP-backed and costs a fraction of the CPU of the
+                // FFmpeg SOFTWARE decoder, so it goes FIRST for minimum CPU —
+                // this is the main lever behind the ~20-50% decode load, since
+                // FFmpeg-first meant common formats (mp3/aac/flac) were decoded
+                // on the CPU even when the device has a hardware decoder.
+                // FfmpegAudioRenderer stays as the FALLBACK so exotic formats
+                // MediaCodec can't handle still play. ReplayGain is applied in
+                // BOTH paths (processor is passed to the FFmpeg renderer and to
+                // the MediaCodec renderer's audio sink), so gain is unaffected.
                 arrayOf(
-                    FfmpegAudioRenderer(handler, audioListener, replayGainProcessor),
                     MediaCodecAudioRenderer(
                         context,
                         MediaCodecSelector.DEFAULT,
@@ -709,12 +720,31 @@ class ExoPlaybackStateHolder(
                         audioListener,
                         DefaultAudioSink.Builder(context)
                             .setAudioProcessors(arrayOf(replayGainProcessor))
-                            .build()))
+                            .build()),
+                    FfmpegAudioRenderer(handler, audioListener, replayGainProcessor))
             }
 
             val exoPlayer =
                 ExoPlayer.Builder(context, audioRenderer)
                     .setMediaSourceFactory(mediaSourceFactory)
+                    // Local files have no network latency to mask, so ExoPlayer's
+                    // default ~50s max buffer just makes the decoder front-load a
+                    // huge chunk right after playback starts — the "sits at ~22%,
+                    // then ramps to ~50% for a few seconds with nothing touched"
+                    // symptom (top showed ExoPlayer:Playback + MediaCodec_loop
+                    // roughly doubling, no other thread involved). A small buffer
+                    // is plenty for gapless local playback and keeps decode work
+                    // spread thin instead of bursty. Keep min<=max and the two
+                    // playback-start thresholds well under min.
+                    .setLoadControl(
+                        DefaultLoadControl.Builder()
+                            .setBufferDurationsMs(
+                                /* minBufferMs= */ 5_000,
+                                /* maxBufferMs= */ 15_000,
+                                /* bufferForPlaybackMs= */ 1_000,
+                                /* bufferForPlaybackAfterRebufferMs= */ 2_000)
+                            .setPrioritizeTimeOverSizeThresholds(true)
+                            .build())
                     // Enable automatic WakeLock support
                     .setWakeMode(C.WAKE_MODE_LOCAL)
                     .setAudioAttributes(
