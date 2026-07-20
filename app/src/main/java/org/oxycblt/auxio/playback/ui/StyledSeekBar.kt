@@ -63,10 +63,21 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
             // the app, and that the user is not currently seeking (which would cause the SeekBar
             // to jump around).
             if (from <= durationDs && !isActivated) {
-                binding.seekBarSlider.value = from.toFloat()
-                // We would want to keep this in the listener, but the listener only fires when
-                // a value changes completely, and sometimes that does not happen with this view.
-                binding.seekBarPosition.text = from.formatDurationDs(true)
+                // PERF: setting Slider.value re-runs the Material Slider's
+                // internal invalidate/label/animation machinery even when the
+                // value is unchanged, and setting the label TextView re-lays-out
+                // the row. Position updates arrive several times a second while
+                // the playback page is visible, and any repeat kept the slider
+                // invalidating every frame -> RenderThread recomposited the whole
+                // surface continuously (the CPU that appears only when the
+                // playback page is on screen). Skip no-op updates.
+                val newValue = from.toFloat()
+                if (binding.seekBarSlider.value != newValue) {
+                    binding.seekBarSlider.value = newValue
+                    // We would want to keep this in the listener, but the listener only fires when
+                    // a value changes completely, and sometimes that does not happen with this view.
+                    binding.seekBarPosition.text = from.formatDurationDs(true)
+                }
             }
         }
 

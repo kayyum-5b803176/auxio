@@ -65,6 +65,11 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
 
     private var active = false
     private var scrollModeEnabled = false
+    // Whether THIS text has already done its reveal scroll. Prevents a
+    // play/pause toggle or a sheet visibility change on the SAME song from
+    // re-triggering the scroll (which would restart the per-frame redraw window
+    // every time playback is paused/resumed). Reset when the text changes.
+    private var revealedForCurrentText = false
     private var rtl = false
     private var offsetPx = 0f
     private var scrollRangePx = 0f
@@ -73,8 +78,22 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
     private var animator: ValueAnimator? = null
     private val speedPxPerSec = SPEED_DP_PER_SEC * context.resources.displayMetrics.density
 
+    init {
+        if (!SCROLLING_ENABLED) {
+            // Fully static: plain single-line TextView with an end ellipsis, no
+            // horizontal scrolling, no animator, no per-frame invalidation. This
+            // is the zero-CPU marquee mode — long titles are truncated with "…".
+            ellipsize = TextUtils.TruncateAt.END
+            setHorizontallyScrolling(false)
+        }
+    }
+
     override fun setSelected(selected: Boolean) {
+        // When scrolling is disabled, selection is a no-op for marquee purposes
+        // (still forward to super for normal selection semantics, but never
+        // start the scroll animator).
         super.setSelected(selected)
+        if (!SCROLLING_ENABLED) return
         if (selected) {
             maybeStart()
         } else {
@@ -89,7 +108,9 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
         lengthAfter: Int
     ) {
         super.onTextChanged(text, start, lengthBefore, lengthAfter)
-        // New text: reset and (if still selected) restart after re-layout.
+        if (!SCROLLING_ENABLED) return
+        // New text (new song): allow one fresh reveal.
+        revealedForCurrentText = false
         stop()
         if (isSelected) {
             post { maybeStart() }
@@ -98,6 +119,7 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        if (!SCROLLING_ENABLED) return
         if (active) {
             // Geometry changed under a running scroll; restart cleanly.
             stop()
@@ -138,7 +160,7 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
     }
 
     private fun maybeStart() {
-        if (active || !isAttachedToWindow || width == 0) return
+        if (active || revealedForCurrentText || !isAttachedToWindow || width == 0) return
         // Measuring the overflow needs the FULL text laid out on one unbounded
         // line: horizontallyScrolling=true (some styles only set maxLines=1,
         // which doesn't enable it) and no ellipsis. Both rebuild the layout,
@@ -159,7 +181,8 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
         val lineW = layout.getLineWidth(0)
         scrollRangePx = lineW - availW + EDGE_GAP_PX
         if (scrollRangePx <= EDGE_GAP_PX || availW <= 0f) {
-            // Fits — nothing to scroll.
+            // Fits — nothing to scroll; count as revealed so we don't retry.
+            revealedForCurrentText = true
             finishIdle()
             return
         }
@@ -173,6 +196,7 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
         // past what was actually rendered.
         scrollRangePx = min(scrollRangePx, bitmap.width - availW + EDGE_GAP_PX)
         active = true
+        revealedForCurrentText = true
         repeatsLeft = REPEATS
         offsetPx = 0f
         invalidate()
@@ -265,12 +289,26 @@ constructor(context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
     private fun finishIdle() = stop()
 
     private companion object {
-        // Crawl speed; framework default is ~30dp/s.
-        const val SPEED_DP_PER_SEC = 32f
-        // Full scroll passes per activation, then fully idle.
-        const val REPEATS = 3
-        const val START_HOLD_MS = 1200L
-        const val END_HOLD_MS = 900L
+        // Marquee scrolling inherently redraws every frame WHILE it scrolls
+        // (smooth motion = new pixels each vsync), which on the player page was
+        // the ~15% "player page only" CPU bump. We can't make scrolling itself
+        // free, so we bound it: scroll the full title ONCE, a bit faster, with
+        // short holds, then go completely idle (zero redraws, END ellipsis)
+        // until the next song. This reveals the whole name after a track change
+        // but keeps the per-frame-redraw window to a few seconds instead of
+        // continuous. (Set REPEATS higher / SPEED lower to trade CPU for more
+        // scrolling; set REPEATS=0-equivalent by using a static ellipsis view.)
+        // MASTER SWITCH. false = fully static end-ellipsis title (ZERO per-
+        // frame redraw cost — the marquee never scrolls, never runs an
+        // animator, never invalidates). Set true to re-enable the brief
+        // scroll-once-then-rest reveal.
+        const val SCROLLING_ENABLED = false
+
+        const val SPEED_DP_PER_SEC = 48f
+        // A single full reveal per song, then rest.
+        const val REPEATS = 1
+        const val START_HOLD_MS = 1500L
+        const val END_HOLD_MS = 600L
         // Extra px scrolled past the end so the last glyph fully clears.
         const val EDGE_GAP_PX = 8f
         // Stay under common GPU max texture sizes; absurdly long titles simply

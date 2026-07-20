@@ -36,6 +36,7 @@ import androidx.media3.exoplayer.RenderersFactory
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.mediacodec.DefaultMediaCodecAdapterFactory
 import androidx.media3.exoplayer.source.MediaSource
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -701,21 +702,29 @@ class ExoPlaybackStateHolder(
             // Since Auxio is a music player, only specify an audio renderer to save
             // battery/apk size/cache size]
             val audioRenderer = RenderersFactory { handler, _, audioListener, _, _ ->
-                // Renderer ORDER = decode PRIORITY: ExoPlayer uses the first
-                // renderer that supports the track. MediaCodecAudioRenderer is
-                // hardware/DSP-backed and costs a fraction of the CPU of the
-                // FFmpeg SOFTWARE decoder, so it goes FIRST for minimum CPU —
-                // this is the main lever behind the ~20-50% decode load, since
-                // FFmpeg-first meant common formats (mp3/aac/flac) were decoded
-                // on the CPU even when the device has a hardware decoder.
-                // FfmpegAudioRenderer stays as the FALLBACK so exotic formats
-                // MediaCodec can't handle still play. ReplayGain is applied in
-                // BOTH paths (processor is passed to the FFmpeg renderer and to
-                // the MediaCodec renderer's audio sink), so gain is unaffected.
+                // MediaCodecAudioRenderer (hardware) FIRST, FFmpeg fallback.
+                //
+                // Force the SYNCHRONOUS MediaCodec adapter. Media3 defaults to
+                // the ASYNCHRONOUS adapter on API 31+, which runs the codec via
+                // a dedicated buffer-enqueuer thread + a callback thread. A
+                // Perfetto trace of playback showed the per-buffer cost roughly
+                // DOUBLE mid-track (same wakeup rate, ~2x CPU each) across all
+                // ExoPlayer/MediaCodec threads while UI stayed flat — the async
+                // cross-thread buffer hopping. VLC plays the same file at ~18%
+                // by decoding+writing directly; the async ExoPlayer path was the
+                // difference. The synchronous adapter decodes inline with far
+                // less thread-hop overhead.
+                //
+                // API note: the method is forceDisableAsynchronous() in this
+                // Media3 version (an earlier attempt used a non-existent name).
+                val syncCodecFactory =
+                    DefaultMediaCodecAdapterFactory(context).forceDisableAsynchronous()
                 arrayOf(
                     MediaCodecAudioRenderer(
                         context,
+                        syncCodecFactory,
                         MediaCodecSelector.DEFAULT,
+                        /* enableDecoderFallback= */ false,
                         handler,
                         audioListener,
                         DefaultAudioSink.Builder(context)

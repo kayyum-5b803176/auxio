@@ -1,5 +1,147 @@
 # Performance fixes (foreground CPU 99–201% -> expected near-idle)
 
+## v5.1.9 — NOT a hardware floor: VLC plays the same file at 18%
+
+Critical control: VLC plays the SAME AAC file on the SAME device at a flat 18%,
+no bump. So the ~45-51% + mid-playback doubling is NOT a device/codec floor
+(previous conclusion RETRACTED) — it's the ExoPlayer path. Also confirmed: the
+27->51 bump reproduces on Auxio 3.7.3 (no fork code, no plugins) and on the
+SAME song with no track change, so it was never fork-specific or plugin-related.
+
+Perfetto trace (spanning the jump at t=24s) showed: every AUDIO thread's CPU
+~doubles (ExoPlayer:Playback 71->169ms/s, MediaCodec_loop 43->107ms/s, main
+41->81), RenderThread stays 0, decoder WAKEUP RATE is flat (~135->120/s) — so
+each decode op got ~2x more expensive, not more ops. Hardware MediaCodec IS in
+use (MediaCodec_loop/HwBinder/CCodecWatchdog active). The delta vs VLC is
+ExoPlayer's multi-thread buffer pipeline + the ASYNCHRONOUS MediaCodec adapter
+(dedicated enqueuer + callback threads, cross-thread buffer hops).
+
+Fix: force the synchronous adapter via
+DefaultMediaCodecAdapterFactory(context).forceDisableAsynchronous()
+(CORRECT method name this time — v5.1.5 used a non-existent
+forceDisableAsynchronousBufferQueueing() and failed to build). Constructor
+(context, adapterFactory, selector, enableDecoderFallback, handler, listener,
+sink) verified against Media3 1.3.x.
+
+CONFIDENCE: highest-probability lever from the trace, but ExoPlayer inherently
+buffer-shuffles more than VLC, so this may land between 18% and 45%, not exactly
+at VLC's 18%. Re-measure. If it helps but a gap remains, next lever is the
+AudioProcessor chain / audio offload.
+
+(Marquee scrolling left DISABLED from v5.1.8 for a clean measurement; it was
+exonerated as the playback-bump cause, so SCROLLING_ENABLED can be flipped back
+to true for UI once CPU is settled.)
+
+
+## v5.1.8 — marquee scrolling fully disabled (static ellipsis)
+
+User requested full marquee disable as a controlled test: current build shows a
+flat 38% from the start of play (no on/off bump), so scrolling is no longer the
+obvious variable — disabling it isolates whether the marquee contributes at all.
+
+ThrottledMarqueeTextView: added SCROLLING_ENABLED master switch (default FALSE).
+When false the view is a plain single-line end-ellipsis TextView — no
+horizontal scroll, no ValueAnimator, no per-frame invalidate(); setSelected /
+onTextChanged / onSizeChanged all early-return. Long titles truncate with "…".
+Set SCROLLING_ENABLED=true to restore the brief scroll-once-then-rest reveal.
+
+DIAGNOSTIC NOTE: this is a test build. If CPU during player-page playback drops
+after this, the marquee redraw was contributing; if it stays at ~38-51%, the
+cost is elsewhere and the pending "trace across the 27->51 jump" is still the
+way to find the delayed-onset trigger.
+
+
+## v5.1.7 — player-page bump is the scrolling title marquee (my own r3 code)
+
+Diffing two same-audio traces (Settings page vs Player page) isolated the delta
+cleanly: the player page adds RenderThread + libGLES_mali (GPU) +
+CanvasContext::draw + SkiaOpenGLPipeline::draw + eglSwapBuffersWithDamageKHR —
+all ZERO on Settings. I.e. the player page GPU-composites and swaps a full
+frame EVERY vsync; Settings is static. That ~15% (main+RenderThread+GPU) is the
+whole 27->51 bump, and it is NOT audio (audio is identical on both pages).
+
+The driver is ThrottledMarqueeTextView (added earlier this session): its
+ValueAnimator calls invalidate() every frame for the ENTIRE scroll of a long
+title (~tens of seconds/song at 3 repeats), forcing continuous full-surface
+redraws. My earlier "bitmap" optimization made each frame cheaper but the frame
+COUNT is inherent to smooth scrolling — I moved the cost, didn't remove it.
+Honest correction of my own prior fix.
+
+Chosen tradeoff (user picked "scroll briefly then rest"): reveal the full title
+ONCE per song, faster (48dp/s) with short holds, then go fully idle (zero
+redraws) until the next track. Added revealedForCurrentText so play/pause
+toggles or sheet-visibility changes on the SAME song don't re-trigger scrolling
+(which would restart the redraw window); the flag resets on new text (new song).
+
+RESULT: steady-state player-page CPU should now match the ~27% Settings/back-
+ground baseline. A brief per-frame-redraw bump remains for the ~2-4s reveal
+right after each song change, BY DESIGN — that's what "scroll briefly" means. To
+eliminate even that, switch to a static ellipsis (no scroll). Constants at the
+bottom of ThrottledMarqueeTextView tune the reveal length/speed.
+
+## v5.1.6 — playback bump is the VISIBLE seekbar, not audio (reverted v5.1.5)
+
+Decisive user observation: with the SAME track playing uninterrupted, CPU is
+~51% only when the playback page is on screen; it drops to ~27% when the app is
+backgrounded OR when a different page (Settings) is shown. Audio decode is
+identical in all three, so the extra ~24% is entirely the playback PAGE
+rendering, not audio. This also proves the v5.1.5 async-adapter theory wrong.
+
+v5.1.5 REVERTED: forceDisableAsynchronousBufferQueueing() doesn't exist in the
+vendored Media3 (build error) AND the premise was wrong — the async decoder
+threads are a constant ~27% baseline present in every state, not the variable
+cost.
+
+Trace of the visible-page state: RenderThread draws a FULL frame every vsync
+(RenderThread::threadLoop -> DrawFrameTask -> CanvasContext::draw ->
+SkiaOpenGLPipeline::draw/swapBuffers), i.e. the surface recomposites
+continuously. App-code frames inside performTraversals pointed at
+com.google.android.material.slider.BaseSlider.updateLabels + a BaseSlider
+OnGlobalLayout lambda — the Material Slider (seekbar) keeping the page live.
+
+Fixes:
+ - StyledSeekBar.positionDs: skip no-op value/label updates (was re-running the
+   Slider's invalidate/label/animation machinery several times a second even
+   when unchanged).
+ - view_seek_bar.xml: Slider labelBehavior=gone — removes the redundant
+   floating value bubble (updateLabels was in the hot path) whose animated
+   indicator invalidates per frame. Auxio already shows position/duration in its
+   own TextViews, so nothing is lost visually.
+
+CAVEAT: the updateLabels signal was small in the sample, so this may not be the
+FULL 24%. Both changes are safe reductions regardless; re-trace to confirm how
+much of the visible-page cost remains (if any, the next suspect is per-frame
+invalidation from the cover/rounded-outline or a stuck ripple).
+
+## v5.1.5 — playback bump root cause: ASYNC MediaCodec adapter overhead
+
+The v5.1.4 inset guard worked (no Auxio UI/inset frames in the next 51% trace)
+but CPU stayed at 51% — so the inset storm was NOT the cause. ~69% of samples
+were in audio threads. Decoding the trace by thread revealed the real cause:
+
+The active decoder work is split across a dedicated ENQUEUER thread running
+AsynchronousMediaCodecBufferEnqueuer.doQueueInputBuffer -> MediaCodec
+.queueInputBuffer (~600 calls in the capture) PLUS a separate callback thread
+looping on MessageQueue.next/epoll_pwait. This is Media3's ASYNCHRONOUS
+MediaCodec adapter (default on API 31+). The async plumbing (extra threads +
+message-passing per buffer) exists to smooth heavy VIDEO decode; for cheap
+audio decode on a capable device the thread-hopping overhead dominates the
+actual decode work and was the bulk of the 27%->51% bump.
+
+Fix (ExoPlaybackStateHolder): force the SYNCHRONOUS MediaCodec adapter via
+DefaultMediaCodecAdapterFactory(context).forceDisableAsynchronousBufferQueueing()
+passed into MediaCodecAudioRenderer. The decode then runs inline on the
+playback thread without the enqueuer/callback thread overhead.
+
+BUILD CAVEAT (could not compile against the vendored :media-lib-exoplayer
+here): the MediaCodecAudioRenderer constructor arg order
+(context, adapterFactory, selector, enableDecoderFallback, handler, listener,
+sink) and the forceDisableAsynchronousBufferQueueing() method name are the
+standard recent-Media3 API. If the vendored Media3 differs, adjust the
+constructor/method to match — the intent is simply "use the synchronous codec
+adapter for the audio renderer." Verify with a fresh trace: the second
+ExoPlayer:Media / enqueuer thread should disappear and playback CPU drop.
+
 ## v5.1.4 — playback CPU bump (27% -> 51%) analysis
 
 Two sampled simpleperf traces at the two load levels during the SAME playback,
