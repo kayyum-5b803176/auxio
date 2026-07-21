@@ -401,16 +401,49 @@ constructor(
         val storage = Storage(cache, covers, storedPlaylists)
         val interpretation = Interpretation(nameFactory, separators)
         val config = Config(fs, storage, interpretation)
-        val result = Musikr.new(context, config).run(::emitIndexingProgress)
+        val musikr = Musikr.new(context, config)
+
+        // FAST PATH: if this is a cache-enabled load and we already have a persisted on-disk
+        // snapshot for the current revision, rebuild the library straight from it - no MediaStore
+        // walk, no tag parsing, no cover re-decode. This is what makes app reopens and cold starts
+        // (common on OEM ROMs that kill the process) avoid a full rescan. It fails closed: any
+        // problem returns null and we fall through to the normal scan below.
+        if (withCache && currentRevision != null) {
+            val snapshotResult =
+                try {
+                    musikr.loadSnapshot(currentRevision.toString())
+                } catch (e: Exception) {
+                    L.e("Snapshot load threw, falling back to scan: $e")
+                    null
+                }
+            if (snapshotResult != null) {
+                L.d("Loaded library from snapshot, skipping scan")
+                // Revision is unchanged (we loaded the existing one), so just reuse it.
+                emitLibrary(snapshotResult.library)
+                snapshotResult.cleanup()
+                // No persistSnapshot() here: the on-disk snapshot is already current.
+                emitIndexingCompletion(null)
+                return
+            }
+            L.d("No usable snapshot, performing full scan")
+        }
+
+        val result = musikr.run(::emitIndexingProgress)
         // Music loading completed, update the revision right now so we re-use this work
         // later.
         musicSettings.revision = newRevision
         // Deliver the library to the rest of the app
         // This will more or less block until all required item translation and
         // cleanup finishes.
-        emitLibrary(result.library)
+        val changed = emitLibrary(result.library)
         // Clean up old data that is now impossible for the app to be using.
         result.cleanup()
+        // Persist a fresh startup snapshot ONLY when the library actually changed, to keep disk
+        // writes (and thus storage wear) proportional to real library changes rather than to how
+        // often a scan happens to run. A snapshot write is a single small atomic file overwrite.
+        if (changed) {
+            result.persistSnapshot(newRevision.toString())
+        }
         // Finish up loading.
         emitIndexingCompletion(null)
     }
@@ -425,7 +458,14 @@ constructor(
         }
     }
 
-    private suspend fun emitLibrary(newLibrary: MutableLibrary) {
+    /**
+     * Deliver a newly-loaded library to the app.
+     *
+     * @return true if the library actually changed compared to what was already loaded (and thus a
+     *   change was dispatched), false if it was identical and skipped. Callers use this to decide
+     *   whether it's worth persisting a fresh startup snapshot.
+     */
+    private suspend fun emitLibrary(newLibrary: MutableLibrary): Boolean {
         val deviceLibraryChanged: Boolean
         val userLibraryChanged: Boolean
         // We want to make sure that all reads and writes are synchronized due to the sheer
@@ -445,7 +485,7 @@ constructor(
             userLibraryChanged = this.library?.playlists != newLibrary.playlists
             if (!deviceLibraryChanged && !userLibraryChanged) {
                 L.d("Library has not changed, skipping update")
-                return
+                return false
             }
 
             this.library = newLibrary
@@ -456,6 +496,7 @@ constructor(
         withContext(Dispatchers.Main) {
             dispatchLibraryChange(deviceLibraryChanged, userLibraryChanged)
         }
+        return true
     }
 
     private suspend fun emitIndexingCompletion(error: Exception?) {

@@ -32,7 +32,25 @@ import org.oxycblt.musikr.playlist.interpret.PlaylistInterpreter
 import org.oxycblt.musikr.tag.interpret.TagInterpreter
 
 internal interface EvaluateStep {
-    suspend fun evaluate(extractedMusic: Channel<Extracted>): MutableLibrary
+    /**
+     * Evaluate music coming off the extract pipeline into a full library.
+     *
+     * @param extractedMusic the channel of extracted items.
+     * @param onRawSong optional callback invoked for every valid [RawSong] as it's consumed. Used
+     *   to capture a snapshot of the raw inputs without a second pass. Playlists are intentionally
+     *   not captured here because they're already persisted separately by StoredPlaylists.
+     */
+    suspend fun evaluate(
+        extractedMusic: Channel<Extracted>,
+        onRawSong: (suspend (RawSong) -> Unit)? = null
+    ): MutableLibrary
+
+    /**
+     * Evaluate a pre-reconstructed list of [RawSong]s (from a snapshot) into a full library,
+     * bypassing the explore + extract pipeline entirely. Playlists are re-read from StoredPlaylists,
+     * matching the normal path, since they're cheap and persisted independently.
+     */
+    suspend fun evaluateFromRaw(rawSongs: List<RawSong>): MutableLibrary
 
     companion object {
         fun new(context: Context, config: Config, interpretation: Interpretation): EvaluateStep =
@@ -52,11 +70,17 @@ private class EvaluateStepImpl(
     private val storedPlaylists: StoredPlaylists,
     private val libraryFactory: LibraryFactory
 ) : EvaluateStep {
-    override suspend fun evaluate(extractedMusic: Channel<Extracted>): MutableLibrary {
+    override suspend fun evaluate(
+        extractedMusic: Channel<Extracted>,
+        onRawSong: (suspend (RawSong) -> Unit)?
+    ): MutableLibrary {
         val builder = MusicGraph.builder()
         for (extracted in extractedMusic) {
             when (extracted) {
-                is RawSong -> builder.add(tagInterpreter.interpret(extracted))
+                is RawSong -> {
+                    builder.add(tagInterpreter.interpret(extracted))
+                    onRawSong?.invoke(extracted)
+                }
                 is RawPlaylist -> builder.add(playlistInterpreter.interpret(extracted.file))
                 is InvalidSong -> {}
             }
@@ -77,6 +101,20 @@ private class EvaluateStepImpl(
             }
         }
 
+        return libraryFactory.create(graph, storedPlaylists, playlistInterpreter)
+    }
+
+    override suspend fun evaluateFromRaw(rawSongs: List<RawSong>): MutableLibrary {
+        val builder = MusicGraph.builder()
+        for (rawSong in rawSongs) {
+            builder.add(tagInterpreter.interpret(rawSong))
+        }
+        // Playlists are persisted independently and cheap to read; pull them the same way the
+        // normal explore step does so snapshot-loaded libraries still include user playlists.
+        for (playlist in storedPlaylists.read()) {
+            builder.add(playlistInterpreter.interpret(playlist))
+        }
+        val graph = builder.build()
         return libraryFactory.create(graph, storedPlaylists, playlistInterpreter)
     }
 }
