@@ -95,7 +95,7 @@ private constructor(
     }
 
     fun start() {
-        if (musicRepository.indexingState == null) {
+        if (musicRepository.indexingState == null && musicRepository.library == null) {
             requestIndex(true)
         }
     }

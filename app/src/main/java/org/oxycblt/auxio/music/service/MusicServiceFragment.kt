@@ -91,9 +91,11 @@ constructor(
     }
 
     fun start() {
-        if (musicRepository.indexingState == null) {
-            L.d("Requesting index")
+        if (musicRepository.indexingState == null && musicRepository.library == null) {
+            L.d("Requesting initial index")
             musicRepository.requestIndex(true)
+        } else {
+            L.d("Library already loaded or currently indexing, not requesting a new index")
         }
     }
 
