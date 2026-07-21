@@ -156,11 +156,18 @@ constructor(context: Context, attrs: AttributeSet? = null, @AttrRes defStyleAttr
                     // foreground-only CPU cost on the home/queue lists and player
                     // page (the "bar animation" spike). As bitmap frames, each
                     // frame swap is a cheap blit.
+                    //
+                    // IMPORTANT: this happens in CoverView's constructor, which runs once
+                    // per list-item ViewHolder (every song/album/artist/genre/playlist row).
+                    // rasterizeDp() caches the rasterized bitmaps per (drawable, size) and
+                    // only does the real 30-frame rasterization once globally - every
+                    // CoverView after the first just reuses those bitmaps. Do NOT resolve
+                    // the source AnimationDrawable here and pass it in; that would defeat
+                    // the cache by re-inflating the vector drawable on every construction
+                    // even on a cache hit. Pass the resource id and let rasterize() resolve
+                    // it lazily, only on an actual cache miss.
                     BitmapAnimationDrawable.rasterizeDp(
-                        context,
-                        context.getDrawableCompat(R.drawable.ic_playing_indicator_24)
-                            as AnimationDrawable,
-                        PLAYING_INDICATOR_SIZE_DP),
+                        context, R.drawable.ic_playing_indicator_24, PLAYING_INDICATOR_SIZE_DP),
                     context.getDrawableCompat(R.drawable.ic_paused_indicator_24))
             } else {
                 null
