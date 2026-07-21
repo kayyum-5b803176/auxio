@@ -20,7 +20,11 @@ package org.oxycblt.musikr.pipeline
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import org.oxycblt.musikr.BuildConfig
 import org.oxycblt.musikr.Config
 import org.oxycblt.musikr.Interpretation
@@ -104,17 +108,33 @@ private class EvaluateStepImpl(
         return libraryFactory.create(graph, storedPlaylists, playlistInterpreter)
     }
 
-    override suspend fun evaluateFromRaw(rawSongs: List<RawSong>): MutableLibrary {
-        val builder = MusicGraph.builder()
-        for (rawSong in rawSongs) {
-            builder.add(tagInterpreter.interpret(rawSong))
+    override suspend fun evaluateFromRaw(rawSongs: List<RawSong>): MutableLibrary =
+        coroutineScope {
+            // Tag interpretation (particularly name tokenization for sorting) is real CPU work
+            // per song - profiling flagged it as a significant chunk of normal song-building
+            // time (see IntelligentKnownName.parseTokens). Running it sequentially for a whole
+            // snapshot-loaded library (hundreds of songs) adds up to a very visible delay before
+            // anything can be shown. tagInterpreter.interpret() is a pure function of its input
+            // (no shared mutable state), so it's safe to fan out across a worker pool - this
+            // mirrors how ExtractStep already parallelizes per-file tag extraction during a
+            // normal scan.
+            val preSongs =
+                rawSongs
+                    .map { rawSong -> async(Dispatchers.Default) { tagInterpreter.interpret(rawSong) } }
+                    .awaitAll()
+
+            // Building the graph itself is cheap (map insertions) - keep it single-threaded and
+            // sequential, since MusicGraph.Builder is not safe for concurrent mutation.
+            val builder = MusicGraph.builder()
+            for (preSong in preSongs) {
+                builder.add(preSong)
+            }
+            // Playlists are persisted independently and cheap to read; pull them the same way the
+            // normal explore step does so snapshot-loaded libraries still include user playlists.
+            for (playlist in storedPlaylists.read()) {
+                builder.add(playlistInterpreter.interpret(playlist))
+            }
+            val graph = builder.build()
+            libraryFactory.create(graph, storedPlaylists, playlistInterpreter)
         }
-        // Playlists are persisted independently and cheap to read; pull them the same way the
-        // normal explore step does so snapshot-loaded libraries still include user playlists.
-        for (playlist in storedPlaylists.read()) {
-            builder.add(playlistInterpreter.interpret(playlist))
-        }
-        val graph = builder.build()
-        return libraryFactory.create(graph, storedPlaylists, playlistInterpreter)
-    }
 }

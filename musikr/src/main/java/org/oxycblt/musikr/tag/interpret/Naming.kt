@@ -49,7 +49,20 @@ data object SimpleNaming : Naming() {
     override fun name(raw: String, sort: String?): Name.Known = SimpleKnownName(raw, sort)
 }
 
-private val collator: Collator = Collator.getInstance().apply { strength = Collator.PRIMARY }
+// java.text.Collator is explicitly documented as NOT safe for concurrent use from multiple
+// threads - it has internal mutable state used during comparison/key generation. A single
+// shared instance was fine as long as tag interpretation only ever ran on one thread at a
+// time, but that's no longer guaranteed (see EvaluateStep.evaluateFromRaw, which parallelizes
+// interpretation across a worker pool for fast snapshot loads). Giving each thread its own
+// Collator via ThreadLocal keeps this safe under concurrent use while still avoiding the cost
+// of calling Collator.getInstance() on every single token.
+private val threadLocalCollator =
+    object : ThreadLocal<Collator>() {
+        override fun initialValue(): Collator =
+            Collator.getInstance().apply { strength = Collator.PRIMARY }
+    }
+private val collator: Collator
+    get() = threadLocalCollator.get()!!
 private val punctRegex by lazy { Regex("[\\p{Punct}+]") }
 
 // TODO: Consider how you want to handle whitespace and "gaps" in names.

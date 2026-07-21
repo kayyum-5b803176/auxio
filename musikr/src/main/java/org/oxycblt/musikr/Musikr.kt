@@ -21,6 +21,8 @@ package org.oxycblt.musikr
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import org.oxycblt.musikr.pipeline.EvaluateStep
@@ -197,9 +199,9 @@ private class MusikrImpl(
         LibraryResultImpl(config, library, snapshotStore, snapshotConverter, capturedRawSongs)
     }
 
-    override suspend fun loadSnapshot(expectedRevision: String?): LibraryResult? {
+    override suspend fun loadSnapshot(expectedRevision: String?): LibraryResult? = coroutineScope {
         val start = System.currentTimeMillis()
-        val snapshot = snapshotStore.read() ?: return null
+        val snapshot = snapshotStore.read() ?: return@coroutineScope null
 
         // Reject a snapshot whose recorded revision no longer matches what the caller expects; the
         // covers it references may have been cleaned up under a newer revision.
@@ -207,20 +209,22 @@ private class MusikrImpl(
             Log.d(
                 "Musikr",
                 "Snapshot revision ${snapshot.revision} != expected $expectedRevision, ignoring")
-            return null
+            return@coroutineScope null
         }
 
-        val rawSongs = ArrayList<RawSong>(snapshot.songs.size)
-        for (snapshotSong in snapshot.songs) {
-            val rawSong = snapshotConverter.toRawSong(snapshotSong, config.storage)
-            if (rawSong == null) {
-                // A song couldn't be safely rebuilt (e.g. its volume is gone). Abandon the whole
-                // snapshot rather than present a partial library.
-                Log.w("Musikr", "Snapshot song could not be reconstructed, ignoring snapshot")
-                return null
-            }
-            rawSongs.add(rawSong)
+        val rawSongsOrNull =
+            snapshot.songs
+                .map { snapshotSong ->
+                    async(Dispatchers.IO) { snapshotConverter.toRawSong(snapshotSong, config.storage) }
+                }
+                .awaitAll()
+        if (rawSongsOrNull.any { it == null }) {
+            // A song couldn't be safely rebuilt (e.g. its volume is gone). Abandon the whole
+            // snapshot rather than present a partial library.
+            Log.w("Musikr", "Snapshot song could not be reconstructed, ignoring snapshot")
+            return@coroutineScope null
         }
+        @Suppress("UNCHECKED_CAST") val rawSongs = rawSongsOrNull as List<RawSong>
 
         val library = evaluateStep.evaluateFromRaw(rawSongs)
         Log.d(
@@ -229,7 +233,7 @@ private class MusikrImpl(
                 "${System.currentTimeMillis() - start}ms")
         // A snapshot load reflects on-disk state as-is; nothing new to persist, so pass null raw
         // songs to indicate "no snapshot rewrite needed".
-        return LibraryResultImpl(config, library, snapshotStore, snapshotConverter, null)
+        LibraryResultImpl(config, library, snapshotStore, snapshotConverter, null)
     }
 }
 
