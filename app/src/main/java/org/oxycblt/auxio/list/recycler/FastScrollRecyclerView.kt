@@ -229,6 +229,20 @@ constructor(context: Context, attrs: AttributeSet? = null, @AttrRes defStyleAttr
 
     // --- RECYCLERVIEW EVENT MANAGEMENT ---
 
+    // The last adapter position we resolved popup text for. onPreDraw fires on
+    // EVERY draw frame this decoration draws - during a fast-scroll drag, that's
+    // often dozens of frames while the top visible item position doesn't
+    // actually change (position only moves at whole-item granularity, not every
+    // pixel). Without this guard, provider.getPopup() - which allocates strings
+    // via resolveNames()/.thumb()/DateUtils.formatDateRange() depending on sort
+    // mode - reran on every one of those frames regardless, which showed up as
+    // heavy short-lived-object churn (and GC pressure) specifically during
+    // fast-scroll sessions. Skipping recomputation when the position hasn't
+    // moved mirrors the same guard already applied to MainFragment.onPreDraw
+    // and CoordinatorAppBarLayout.
+    private var lastPopupAdapterPos = NO_POSITION
+    private var lastPopupText = ""
+
     private fun onPreDraw() {
         updateThumbState()
 
@@ -258,12 +272,20 @@ constructor(context: Context, attrs: AttributeSet? = null, @AttrRes defStyleAttr
         val provider = popupProvider
         if (firstAdapterPos != NO_POSITION && provider != null) {
             popupView.isInvisible = false
-            // Get the popup text. If there is none, we default to "?".
-            popupText = provider.getPopup(firstAdapterPos) ?: "?"
+            if (firstAdapterPos == lastPopupAdapterPos) {
+                // Position hasn't moved since last frame - reuse the already-resolved text
+                // instead of re-running the (allocation-heavy) provider lookup again.
+                popupText = lastPopupText
+            } else {
+                popupText = provider.getPopup(firstAdapterPos) ?: "?"
+                lastPopupAdapterPos = firstAdapterPos
+                lastPopupText = popupText
+            }
         } else {
             // No valid position or provider, do not show the popup.
             popupView.isInvisible = false
             popupText = ""
+            lastPopupAdapterPos = NO_POSITION
         }
         val popupLayoutParams = popupView.layoutParams as FrameLayout.LayoutParams
 

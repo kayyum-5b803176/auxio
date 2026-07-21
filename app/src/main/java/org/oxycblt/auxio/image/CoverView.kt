@@ -114,13 +114,13 @@ constructor(context: Context, attrs: AttributeSet? = null, @AttrRes defStyleAttr
         shapeAppearance =
             if (uiSettings.roundMode) {
                 if (shapeAppearanceRes != 0) {
-                    ShapeAppearanceModel.builder(context, shapeAppearanceRes, -1).build()
+                    ShapeAppearanceModel.builder(context, shapeAppearanceRes, 0).build()
                 } else {
                     ShapeAppearanceModel.builder(
                             context,
                             com.google.android.material.R.style
                                 .ShapeAppearance_Material3_Corner_Medium,
-                            -1)
+                            0)
                         .build()
                 }
             } else {
