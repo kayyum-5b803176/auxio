@@ -662,8 +662,18 @@ class MainFragment :
             if (playbackModel.song.value != null) {
                 // Playback sheet intercepts queue sheet touch events, prevent that from
                 // occurring by disabling dragging whenever the queue sheet is expanded.
+                // IMPORTANT: Compare against targetState, not state. state reports
+                // STATE_SETTLING for every frame of ANY settle animation - including the
+                // queue sheet settling INTO STATE_COLLAPSED (e.g. right after the queue
+                // was closed). Checking state directly would spuriously flip isDraggable
+                // to false during those transient frames, and since the playback sheet
+                // relies on nested scrolling (not direct touch capture) to collapse while
+                // expanded, onNestedPreScroll's unconditional "if (!draggable) return"
+                // would silently swallow an in-progress downward swipe, leaving the panel
+                // stuck open until the user tries again or presses back. targetState
+                // reports the settle's final destination immediately, sidestepping this.
                 playbackSheetBehavior.isDraggable =
-                    queueSheetBehavior.state == BackportBottomSheetBehavior.STATE_COLLAPSED
+                    queueSheetBehavior.targetState == BackportBottomSheetBehavior.STATE_COLLAPSED
             }
         } else {
             // No queue sheet, fade normally based on the playback sheet
