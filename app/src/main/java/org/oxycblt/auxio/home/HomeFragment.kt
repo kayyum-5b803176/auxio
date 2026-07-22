@@ -34,6 +34,7 @@ import androidx.fragment.app.activityViewModels
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.LifecycleOwner
 import androidx.navigation.fragment.findNavController
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
@@ -179,6 +180,21 @@ class HomeFragment :
             val recycler = VP_RECYCLER_FIELD.get(this@apply)
             val slop = RV_TOUCH_SLOP_FIELD.get(recycler) as Int
             RV_TOUCH_SLOP_FIELD.set(recycler, slop * 3)
+
+            // RecyclerView's own prefetch mechanism (GapWorker) is separate from
+            // offscreenPageLimit above - it still eagerly builds 1-2 adjacent pages ahead of
+            // time regardless of that setting, for scroll smoothness. That's exactly why
+            // Albums/Artists/Genres were all observed rebuilding during a single back-navigation
+            // even after switching offscreenPageLimit to lazy. Disabling it entirely means only
+            // the currently-visible page is ever built until you actually navigate to another
+            // one - the tradeoff is that swiping (not tapping) to an adjacent tab for the first
+            // time may show a brief beat before its content appears, since it's no longer
+            // pre-built a frame ahead of your finger.
+            (recycler as? RecyclerView)?.layoutManager?.let { manager ->
+                if (manager is LinearLayoutManager) {
+                    manager.initialPrefetchItemCount = 0
+                }
+            }
         }
 
         // Further initialization must be done in the function that also handles
