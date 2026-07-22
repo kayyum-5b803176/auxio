@@ -54,7 +54,6 @@ import org.oxycblt.auxio.home.list.GenreListFragment
 import org.oxycblt.auxio.home.list.PlaylistListFragment
 import org.oxycblt.auxio.home.list.SongListFragment
 import org.oxycblt.auxio.home.tabs.NamedTabStrategy
-import org.oxycblt.auxio.home.tabs.Tab
 import org.oxycblt.auxio.list.ListViewModel
 import org.oxycblt.auxio.list.SelectionFragment
 import org.oxycblt.auxio.list.menu.Menu
@@ -161,11 +160,16 @@ class HomeFragment :
             // listener with a non-consuming listener.
             setOnApplyWindowInsetsListener { _, insets -> insets }
 
-            // We know that there will only be a fixed amount of tabs, so we manually set this
-            // limit to the maximum amount possible. This will prevent the tab ripple from
-            // bugging out due to dynamically inflating each fragment, at the cost of slower
-            // debug UI performance.
-            offscreenPageLimit = Tab.MAX_SEQUENCE_IDX + 1
+            // Was previously fixed to Tab.MAX_SEQUENCE_IDX + 1 (i.e. all tabs eagerly built) to
+            // prevent the tab ripple from bugging out due to dynamically inflating each fragment.
+            // That eager build is also what made every tab's RecyclerView inflate its first
+            // screen of ViewHolders simultaneously whenever MainFragment gets recreated (e.g.
+            // returning from Settings via back), which was the dominant cost in a multi-second
+            // back-navigation lag. Reverted to ViewPager2's own lazy default - if the ripple glitch
+            // this was working around reappears (check tab taps/swipes on a fresh app open,
+            // especially jumping straight to a tab you haven't visited yet), revert this single
+            // line back to `Tab.MAX_SEQUENCE_IDX + 1`.
+            offscreenPageLimit = ViewPager2.OFFSCREEN_PAGE_LIMIT_DEFAULT
 
             // By default, ViewPager2's sensitivity is high enough to result in vertical scroll
             // events being registered as horizontal scroll events. Reflect into the internal
