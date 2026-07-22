@@ -159,17 +159,31 @@ class SongListFragment :
         songAdapter.update(songs, homeModel.songInstructions.consume())
     }
 
+    /** Whether a deferred "become visible" post is currently pending, to avoid stacking dupes. */
+    private var pendingNoMusicShow = false
+
     private fun updateNoMusicIndicator(empty: Boolean, indexingState: IndexingState?) {
         val binding = requireBinding()
         binding.homeRecycler.isInvisible = empty
-        binding.homeNoMusic.isInvisible = !empty
-        // Only show the "Music sources" button once indexing has actually finished and confirmed
-        // there's genuinely no music - not while indexingState is null either, which is the brief
-        // window right at startup before indexing has even been requested yet (whether it's about
-        // to resolve instantly from a cached snapshot or take longer via a full scan). Showing the
-        // button in that window meant it would flash visible right before either kind of load
-        // kicked in, even though there was no music-source problem at all.
         binding.homeNoMusicAction.isVisible = empty && indexingState is IndexingState.Completed
+        if (empty) {
+            if (!pendingNoMusicShow) {
+                pendingNoMusicShow = true
+                binding.homeNoMusic.post {
+                    pendingNoMusicShow = false
+                    val current = binding.takeIf { this.binding === it }
+                    // Only actually reveal it if we're still supposed to be empty by the time this
+                    // runs - avoids a stale post overriding a state change that happened in the
+                    // meantime. homeRecycler.isInvisible is always kept in sync synchronously
+                    // above, so it's a reliable source of truth for "are we still empty".
+                    if (current != null && current.homeRecycler.isInvisible) {
+                        current.homeNoMusic.isInvisible = false
+                    }
+                }
+            }
+        } else {
+            binding.homeNoMusic.isInvisible = true
+        }
     }
 
     private fun updateSelection(selection: List<Music>) {
