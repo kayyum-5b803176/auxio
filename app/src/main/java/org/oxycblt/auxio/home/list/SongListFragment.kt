@@ -163,8 +163,13 @@ class SongListFragment :
         val binding = requireBinding()
         binding.homeRecycler.isInvisible = empty
         binding.homeNoMusic.isInvisible = !empty
-        binding.homeNoMusicAction.isVisible =
-            indexingState == null || (empty && indexingState is IndexingState.Completed)
+        // Only show the "Music sources" button once indexing has actually finished and confirmed
+        // there's genuinely no music - not while indexingState is null either, which is the brief
+        // window right at startup before indexing has even been requested yet (whether it's about
+        // to resolve instantly from a cached snapshot or take longer via a full scan). Showing the
+        // button in that window meant it would flash visible right before either kind of load
+        // kicked in, even though there was no music-source problem at all.
+        binding.homeNoMusicAction.isVisible = empty && indexingState is IndexingState.Completed
     }
 
     private fun updateSelection(selection: List<Music>) {

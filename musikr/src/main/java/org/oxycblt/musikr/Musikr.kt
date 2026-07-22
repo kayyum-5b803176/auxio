@@ -218,6 +218,7 @@ private class MusikrImpl(
                     async(Dispatchers.IO) { snapshotConverter.toRawSong(snapshotSong, config.storage) }
                 }
                 .awaitAll()
+
         if (rawSongsOrNull.any { it == null }) {
             // A song couldn't be safely rebuilt (e.g. its volume is gone). Abandon the whole
             // snapshot rather than present a partial library.

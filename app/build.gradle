@@ -18,7 +18,7 @@ android {
 
     defaultConfig {
         applicationId namespace
-        versionName "5.3.1"
+        versionName "5.4.4"
         versionCode 80
 
         minSdk min_sdk
