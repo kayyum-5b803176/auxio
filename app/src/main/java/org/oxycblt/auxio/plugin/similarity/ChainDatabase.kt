@@ -82,6 +82,10 @@ interface EmbeddingDao {
     @Query("SELECT * FROM SongEmbedding")
     suspend fun all(): List<SongEmbedding>
 
+    /** Cheap existence check (no row materialization) for "is there anything to back up". */
+    @Query("SELECT EXISTS(SELECT 1 FROM SongEmbedding LIMIT 1)")
+    suspend fun any(): Boolean
+
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun put(embedding: SongEmbedding)
 
     @Query("DELETE FROM SongEmbedding") suspend fun nuke()
@@ -184,6 +188,10 @@ data class SongQuality(
 interface ChainLogDao {
     @Query("SELECT * FROM ChainLogEntry ORDER BY timestampMs DESC, id DESC LIMIT :limit")
     fun recent(limit: Int): Flow<List<ChainLogEntry>>
+
+    /** Non-reactive snapshot of [recent], for one-shot export (e.g. backup). */
+    @Query("SELECT * FROM ChainLogEntry ORDER BY timestampMs DESC, id DESC LIMIT :limit")
+    suspend fun recentSnapshot(limit: Int): List<ChainLogEntry>
 
     @Insert suspend fun insert(entry: ChainLogEntry)
 

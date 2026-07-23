@@ -363,6 +363,31 @@
 
     <string name="set_plugins">Plugins</string>
     <string name="set_plugins_desc">Enable optional experimental features</string>
+
+    <!-- Backup -->
+    <string name="set_backup">Backup</string>
+    <string name="set_backup_desc">Export or import all app data</string>
+    <string name="set_backup_cat_transfer">Transfer</string>
+    <string name="set_backup_export">Export backup</string>
+    <string name="set_backup_export_desc">Save all learned data, tags, settings, and playlists to a file</string>
+    <string name="set_backup_import">Import backup</string>
+    <string name="set_backup_import_desc">Merge data from a backup file into this device without overwriting anything</string>
+    <string name="set_backup_conflicts_desc">Some items differ between this device and the backup. Choose which to keep for each. Everything else is merged automatically.</string>
+
+    <string name="lbl_backup_export_done">Export complete</string>
+    <string name="lbl_backup_import_done">Import complete</string>
+    <string name="lbl_backup_conflicts">Resolve differences</string>
+    <string name="lbl_backup_error">Backup error</string>
+    <string name="lbl_backup_apply">Apply</string>
+
+    <string name="fmt_backup_export_done">Saved data from %1$d feature(s).</string>
+    <string name="fmt_backup_module_applied">%1$s: %2$d added, %3$d updated</string>
+    <string name="fmt_backup_module_absent">%1$s: nothing in this backup</string>
+    <string name="fmt_backup_module_already">%1$s: already imported (skipped)</string>
+    <string name="fmt_backup_module_skipped">%1$s: skipped (not supported by this version)</string>
+    <string name="fmt_backup_conflict_keep">Keep mine (%1$s)</string>
+    <string name="fmt_backup_conflict_use">Use backup (%1$s)</string>
+
     <string name="set_similarity_detection">Similarity detection</string>
     <string name="set_similarity_detection_desc">Acoustically fingerprint your library to find duplicate songs. Adds a "Find duplicates" entry to Library settings. Has no effect on the app while disabled.</string>
     <string name="set_find_duplicates">Find duplicates</string>

@@ -104,6 +104,11 @@ class RootPreferenceFragment : BasePreferenceFragment(R.xml.preferences_root) {
                 findNavController()
                     .navigateSafe(RootPreferenceFragmentDirections.pluginPreferences())
             }
+            getString(R.string.set_key_backup) -> {
+                L.d("Navigating to backup preferences")
+                findNavController()
+                    .navigateSafe(RootPreferenceFragmentDirections.backupPreferences())
+            }
             getString(R.string.set_key_find_duplicates) -> {
                 L.d("Navigating to duplicates screen")
                 findNavController()

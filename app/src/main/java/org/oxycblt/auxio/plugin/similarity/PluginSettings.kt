@@ -96,7 +96,7 @@ interface PluginSettings : Settings<PluginSettings.Listener> {
 }
 
 class PluginSettingsImpl @Inject constructor(@ApplicationContext private val context: Context) :
-    Settings.Impl<PluginSettings.Listener>(context), PluginSettings {
+    Settings.Impl<PluginSettings.Listener>(context), PluginSettings, PluginSettingsWriter {
 
     override val similarityDetectionEnabled: Boolean
         get() =
@@ -194,6 +194,29 @@ class PluginSettingsImpl @Inject constructor(@ApplicationContext private val con
             }
         }
 
+    // ---- backup-import-only writers (see PluginSettingsWriter) -----------
+    // Ordinary app code flips these through the plugin preference screen's
+    // SwitchPreference views, which write these same keys directly; these
+    // setters exist only so BackupModule implementations (which have no
+    // reason to know raw SharedPreferences keys) can OR-merge a toggle on
+    // import without a public, generally-discouraged mutator on the
+    // PluginSettings interface itself.
+    override fun setSimilarityDetectionEnabled(value: Boolean) {
+        sharedPreferences.edit { putBoolean(getString(R.string.set_key_similarity_detection), value) }
+    }
+
+    override fun setSmartChainEnabled(value: Boolean) {
+        sharedPreferences.edit { putBoolean(getString(R.string.set_key_smart_chain), value) }
+    }
+
+    override fun setZoneAxisEnabled(value: Boolean) {
+        sharedPreferences.edit { putBoolean(getString(R.string.set_key_zone_axis), value) }
+    }
+
+    override fun setTransitionGraphEnabled(value: Boolean) {
+        sharedPreferences.edit { putBoolean(getString(R.string.set_key_transition_graph), value) }
+    }
+
     override fun onSettingChanged(key: String, listener: PluginSettings.Listener) {
         when (key) {
             getString(R.string.set_key_similarity_detection) ->
@@ -205,4 +228,25 @@ class PluginSettingsImpl @Inject constructor(@ApplicationContext private val con
             getString(R.string.set_key_transition_graph) -> listener.onTransitionGraphChanged()
         }
     }
+}
+
+/**
+ * Write access to the plugin toggle flags, needed only by the backup
+ * importer (see `org.oxycblt.auxio.backup.modules.PluginPreferencesBackupModule`).
+ * [PluginSettings] exposes these as read-only `val`s everywhere else in the
+ * app because ordinary code should only flip them through the settings UI;
+ * the backup importer is the one legitimate exception, so it gets this
+ * narrow, explicit interface instead of a public setter that every caller
+ * would see. Lives alongside [PluginSettings] (rather than under the backup
+ * package) so `backup.modules` depends on `plugin.similarity` in one
+ * direction only — no import cycle between the two packages.
+ */
+interface PluginSettingsWriter {
+    fun setSimilarityDetectionEnabled(value: Boolean)
+
+    fun setSmartChainEnabled(value: Boolean)
+
+    fun setZoneAxisEnabled(value: Boolean)
+
+    fun setTransitionGraphEnabled(value: Boolean)
 }

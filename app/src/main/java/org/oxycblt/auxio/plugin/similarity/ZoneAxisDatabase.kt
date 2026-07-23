@@ -93,6 +93,9 @@ interface ZoneAxisDao {
     @Query("SELECT * FROM SongZoneTag WHERE songKey IN (:keys)")
     suspend fun tagsFor(keys: List<String>): List<SongZoneTag>
 
+    /** Every tag row — used by the backup module's export/merge passes. */
+    @Query("SELECT * FROM SongZoneTag") suspend fun allTags(): List<SongZoneTag>
+
     /**
      * When an axis value is deleted, un-assign it from every song that used it,
      * per axis. Kept as two explicit queries (one per column) so the column is

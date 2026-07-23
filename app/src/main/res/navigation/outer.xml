@@ -40,6 +40,9 @@
             android:id="@+id/plugin_preferences"
             app:destination="@id/plugin_preferences_fragment" />
         <action
+            android:id="@+id/backup_preferences"
+            app:destination="@id/backup_fragment" />
+        <action
             android:id="@+id/find_duplicates"
             app:destination="@id/duplicates_fragment" />
         <action
@@ -58,6 +61,11 @@
             android:id="@+id/zone_axis_settings"
             app:destination="@id/zone_axis_fragment" />
     </fragment>
+
+    <fragment
+        android:id="@+id/backup_fragment"
+        android:name="org.oxycblt.auxio.backup.BackupFragment"
+        android:label="backup_fragment" />
 
     <dialog
         android:id="@+id/priority_folders_dialog"

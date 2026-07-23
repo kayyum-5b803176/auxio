@@ -213,4 +213,8 @@
     <string name="set_key_zone_filter_language" translatable="false">auxio_zone_filter_language</string>
     <string name="set_key_zone_filter_type" translatable="false">auxio_zone_filter_type</string>
     <string name="set_key_zone_filter_frequency" translatable="false">auxio_zone_filter_frequency</string>
+
+    <string name="set_key_backup" translatable="false">auxio_backup</string>
+    <string name="set_key_backup_export" translatable="false">auxio_backup_export</string>
+    <string name="set_key_backup_import" translatable="false">auxio_backup_import</string>
 </resources>

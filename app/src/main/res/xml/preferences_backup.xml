@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:title="@string/set_backup">
+
+    <PreferenceCategory app:title="@string/set_backup_cat_transfer">
+
+        <Preference
+            app:icon="@drawable/ic_save_24"
+            app:key="@string/set_key_backup_export"
+            app:summary="@string/set_backup_export_desc"
+            app:title="@string/set_backup_export" />
+
+        <Preference
+            app:key="@string/set_key_backup_import"
+            app:summary="@string/set_backup_import_desc"
+            app:title="@string/set_backup_import" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>
